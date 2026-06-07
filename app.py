@@ -83,7 +83,8 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
     except Exception as e:
         return f"🚨 Erro Crítico na Esteira: {str(e)}"
 
-with gr.Blocks(theme=gr.themes.Soft()) as demo:
+# 🔄 REMOVIDO PARÂMETRO THEME DAQUI PARA EVITAR O USERWARNING
+with gr.Blocks() as demo:
     gr.Markdown("# 🏭 Fábrica de Software Autônoma Enterprise Pro")
     gr.Markdown("Matriz Híbrida: **Gemini 2.5 Pro** ➔ **Qwen 3 Coder Free** ➔ **Gemini 2.5 Flash**")
     
@@ -102,12 +103,14 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             arquivos = gr.File(label="📎 Anexos (Imagens / Planilhas / OpenAPI)", file_count="multiple")
             
         with gr.Column(scale=2):
-            with gr.Box() as p_novo:
+            # 🔄 MODIFICADO DE gr.Box() PARA gr.Group() PARA REPARAR O ATTRIBUTEERROR
+            with gr.Group() as p_novo:
                 gr.Markdown("#### Novo Projeto")
                 requisito = gr.Textbox(label="Requisitos do Software / Prompt", placeholder="Ex: API de e-commerce com carrinho...", lines=4)
                 nome_projeto = gr.Textbox(label="Nome da Pasta do Projeto", value="api_enterprise_service")
                 
-            with gr.Box(visible=False) as p_existente:
+            # 🔄 MODIFICADO DE gr.Box() PARA gr.Group() PARA REPARAR O ATTRIBUTEERROR
+            with gr.Group(visible=False) as p_existente:
                 gr.Markdown("#### Seleção de Projeto Salvo")
                 projeto_existente = gr.Dropdown(label="Escolha o Projeto Alvo", choices=listar_sistemas(), value=listar_sistemas())
                 
@@ -133,4 +136,5 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", show_api=False)
+    # 🔄 PARÂMETRO THEME INJETADO DIRETAMENTE NO LAUNCH CONFORME AS NOVAS DIRETRIZES
+    demo.launch(server_name="0.0.0.0", show_api=False, theme=gr.themes.Soft())
