@@ -1,4 +1,14 @@
-# 🏭 Fábrica de Software Autônoma Enterprise (Gemini 2.5 + Qwen 3 Engine)
+---
+title: Fábrica de Software IA Enterprise
+emoji: 🏭
+colorFrom: blue
+colorTo: gray
+sdk: streamlit
+app_file: app.py
+pinned: false
+---
+
+# 🏭 Fábrica de Software IA Enterprise (Gemini 2.5 + Qwen 3 Engine)
 
 Uma plataforma de *Vibe Coding* industrial e resiliente projetada para o desenvolvimento, evolução incremental e manutenção de microsserviços e APIs corporativas em múltiplas linguagens. O ecossistema utiliza uma **Arquitetura Organizacional de IA por Tiers** orquestrada via **LangGraph**, blindada por portões determinísticos de qualidade (Quality Gates), sandbox de runtime e publicação automatizada na nuvem com criação de repositórios privados no GitHub [INDEX].
 
