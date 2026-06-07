@@ -66,15 +66,26 @@ def obter_llm_dinamica(nome_modelo: str):
         return ChatOpenAI(model="google/gemma-4-31b-it:free", **base)
 
 def executar_com_failover(state, prov_nome, bloco):
-    for _ in range(5):
-        try: return bloco()
+    import time
+    esperas = [5, 15, 30, 60, 90]  # segundos entre tentativas
+    for tentativa in range(5):
+        try:
+            return bloco()
         except Exception as e:
             err = str(e).lower()
-            if any(p in err for p in ["rate_limit", "quota", "limit_exceeded", "429", "auth", "overloaded"]):
+            is_rate = any(p in err for p in ["rate_limit", "quota", "limit_exceeded", "429", "overloaded", "too many"])
+            is_auth = any(p in err for p in ["auth", "invalid api", "unauthorized", "403", "404"])
+            if is_auth:
                 pool_manager.rotacionar(prov_nome)
+                raise e  # auth inválido não adianta esperar
+            if is_rate:
+                pool_manager.rotacionar(prov_nome)
+                espera = esperas[tentativa]
+                print(f"[failover] Rate limit em {prov_nome}, tentativa {tentativa+1}/5. Aguardando {espera}s...")
+                time.sleep(espera)
                 continue
-            raise e
-    raise RuntimeError(f"Pool de chaves esgotado para {prov_nome}!")
+            raise e  # erro desconhecido — não tenta de novo
+    raise RuntimeError(f"Pool de chaves esgotado para {prov_nome} após 5 tentativas com espera.")
 
 def agente_chief_tier0(state):
     def acao():
