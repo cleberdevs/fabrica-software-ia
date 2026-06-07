@@ -11,11 +11,19 @@ class KeyPoolManager:
             "google": [k.strip() for k in os.getenv("GOOGLE_API_KEY", "").split(",") if k.strip()],
             "openrouter": [k.strip() for k in os.getenv("OPENROUTER_API_KEY", "").split(",") if k.strip()]
         }
+        self.indices = {"google": 0, "openrouter": 0}
+
     def obter_chave(self, prov: str):
-        if prov in self.pools and self.pools[prov]: return self.pools[prov][0]
-        raise RuntimeError(f"Chaves esgotadas para {prov}")
+        pool = self.pools.get(prov, [])
+        if not pool:
+            raise RuntimeError(f"Nenhuma chave configurada para {prov}")
+        idx = self.indices.get(prov, 0) % len(pool)
+        return pool[idx]
+
     def rotacionar(self, prov: str):
-        if prov in self.pools and self.pools[prov]: self.pools[prov].pop(0)
+        pool = self.pools.get(prov, [])
+        if pool:
+            self.indices[prov] = (self.indices.get(prov, 0) + 1) % len(pool)
 
 pool_manager = KeyPoolManager()
 
