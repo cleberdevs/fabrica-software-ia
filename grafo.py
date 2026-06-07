@@ -13,8 +13,9 @@ class KeyPoolManager:
             "openrouter": [k.strip() for k in os.getenv("OPENROUTER_API_KEY", "").split(",") if k.strip()]
         }
     def obter_chave(self, prov: str):
-        if prov in self.pools and self.pools[prov]: return self.pools[prov]
-        raise RuntimeError(f"Chaves esgotadas para {prov}")
+       if prov in self.pools and self.pools[prov]: return self.pools[prov][0]
+       raise RuntimeError(f"Chaves esgotadas para {prov}")
+    
     def rotacionar(self, prov: str):
         if prov in self.pools and self.pools[prov]: self.pools[prov].pop(0)
 
