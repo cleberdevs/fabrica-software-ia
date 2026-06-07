@@ -4,8 +4,8 @@ import pandas as pd
 import base64
 import os
 from pathlib import Path
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
+from langchain_openai import ChatOpenAI
 from grafo import app, pool_manager, ler_codigo_da_pasta_legada
 from exporter import exportar_para_estrutura_clean_arch
 
@@ -35,8 +35,13 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
             else:
                 with open(f.name, "rb") as img_file:
                     b64 = base64.b64encode(img_file.read()).decode('utf-8')
-                chv = pool_manager.obter_chave("google")
-                ctx_arq += f"\n### Visão ({f.name}):\n{ChatGoogleGenerativeAI(model='gemini-2.5-flash', google_api_key=chv).invoke([HumanMessage(content=[{'type':'text','text':'Traduz o diagrama em especificacoes.'},{'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{b64}'}}])]).content}\n"
+                chv = pool_manager.obter_chave("openrouter")
+                llm_visao = ChatOpenAI(
+                    model="qwen/qwen2.5-vl-72b-instruct:free",
+                    openai_api_key=chv,
+                    openai_api_base="https://openrouter.ai/api/v1"
+                )
+                ctx_arq += f"\n### Visão ({f.name}):\n{llm_visao.invoke([HumanMessage(content=[{'type':'text','text':'Traduz o diagrama em especificacoes.'},{'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{b64}'}}])]).content}\n"
 
     codigo_legado, hist_erros, e_correcao = "", [], False
     if modo == "Construir Novo Sistema do Zero":
@@ -69,8 +74,12 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
     try:
         state = app.invoke(inputs)
         if state.get("status_passo") == "sucesso" or "codigo_producao" in state:
-            chv_g = pool_manager.obter_chave("google")
-            llm_utils = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=chv_g)
+            chv_g = pool_manager.obter_chave("openrouter")
+            llm_utils = ChatOpenAI(
+                model="google/gemini-2.5-flash-preview:free",
+                openai_api_key=chv_g,
+                openai_api_base="https://openrouter.ai/api/v1"
+            )
             prod = state["codigo_producao"]
             
             docs = llm_utils.invoke(f"Gere o README.md completo com Docker e diagramas Mermaid para o sistema {linguagem}/{framework}:\nDomínio: {prod.camada_dominio}\nAplicação: {prod.camada_aplicacao}\nWeb: {prod.camada_infra_web}").content

@@ -4,7 +4,6 @@ from typing import List, TypedDict
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 class KeyPoolManager:
     def __init__(self):
@@ -13,9 +12,8 @@ class KeyPoolManager:
             "openrouter": [k.strip() for k in os.getenv("OPENROUTER_API_KEY", "").split(",") if k.strip()]
         }
     def obter_chave(self, prov: str):
-       if prov in self.pools and self.pools[prov]: return self.pools[prov][0]
-       raise RuntimeError(f"Chaves esgotadas para {prov}")
-    
+        if prov in self.pools and self.pools[prov]: return self.pools[prov][0]
+        raise RuntimeError(f"Chaves esgotadas para {prov}")
     def rotacionar(self, prov: str):
         if prov in self.pools and self.pools[prov]: self.pools[prov].pop(0)
 
@@ -44,17 +42,20 @@ class EstadoEngenharia(TypedDict):
     relatorio_qualidade: QualityReport; historico_erros: List[str]; status_passo: str
 
 def obter_llm_dinamica(nome_modelo: str):
+    base = {
+        "temperature": 0.1,
+        "openai_api_key": pool_manager.obter_chave("openrouter"),
+        "openai_api_base": "https://openrouter.ai/api/v1"
+    }
     if "qwen" in nome_modelo.lower():
-        return ChatOpenAI(
-            model="qwen/qwen3-coder:free",
-            temperature=0.1,
-            openai_api_key=pool_manager.obter_chave("openrouter"),
-            openai_api_base="https://openrouter.ai"
-        )
+        # Especialista em código
+        return ChatOpenAI(model="qwen/qwen3-coder:free", **base)
     elif "pro" in nome_modelo.lower():
-        return ChatGoogleGenerativeAI(model="gemini-2.5-pro", temperature=0.1, google_api_key=pool_manager.obter_chave("google"))
+        # Chief: melhor raciocínio gratuito
+        return ChatOpenAI(model="deepseek/deepseek-r1:free", **base)
     else:
-        return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1, google_api_key=pool_manager.obter_chave("google"))
+        # Quality gate e testes: rápido e preciso
+        return ChatOpenAI(model="google/gemini-2.5-flash-preview:free", **base)
 
 def executar_com_failover(state, prov_nome, bloco):
     for _ in range(5):
