@@ -58,7 +58,7 @@ class EstadoEngenharia(TypedDict):
 MODELOS_OPENROUTER_FALLBACK = [
     "qwen/qwen3-coder",          # ~$0.30/1M tokens — especialista em código
     "deepseek/deepseek-chat",    # ~$0.14/1M tokens — fallback barato
-    "google/gemini-flash-1.5",   # ~$0.075/1M tokens — mais barato ainda
+    "google/gemini-2.5-flash-lite",   # ~$0.075/1M tokens — mais barato ainda
 ]
 
 def obter_llm_openrouter(indice_modelo: int = 0):
@@ -79,9 +79,9 @@ def obter_llm_google(nome_modelo: str):
         "openai_api_base": "https://openrouter.ai/api/v1"
     }
     if "pro" in nome_modelo.lower():
-        return ChatOpenAI(model="google/gemini-flash-1.5", **base)  # ~$0.075/1M tokens
+        return ChatOpenAI(model="google/gemini-2.5-flash-lite", **base)  # ~$0.075/1M tokens
     else:
-        return ChatOpenAI(model="google/gemini-flash-1.5", **base)  # ~$0.075/1M tokens
+        return ChatOpenAI(model="google/gemini-2.5-flash-lite", **base)  # ~$0.075/1M tokens
 
 def executar_com_failover(state, prov_nome, bloco, bloco_com_modelo=None):
     """
