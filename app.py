@@ -15,7 +15,8 @@ DIR_PROJ = Path("projetos_fabrica")
 DIR_PROJ.mkdir(exist_ok=True)
 
 def listar_sistemas():
-    return [p.name for p in DIR_PROJ.iterdir() if p.is_dir()] or ["Nenhum projeto encontrado"]
+    pastas = [p.name for p in DIR_PROJ.iterdir() if p.is_dir()]
+    return pastas if pastas else ["Nenhum projeto encontrado"]
 
 def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_quebrado, erro_log, nova_funcionalidade, arquivos, linguagem, framework):
     if not requisito and modo == "Construir Novo Sistema do Zero":
@@ -83,7 +84,6 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
     except Exception as e:
         return f"🚨 Erro Crítico na Esteira: {str(e)}"
 
-# 🔄 REMOVIDO PARÂMETRO THEME DAQUI PARA EVITAR O USERWARNING
 with gr.Blocks() as demo:
     gr.Markdown("# 🏭 Fábrica de Software Autônoma Enterprise Pro")
     gr.Markdown("Matriz Híbrida: **Gemini 2.5 Pro** ➔ **Qwen 3 Coder Free** ➔ **Gemini 2.5 Flash**")
@@ -96,23 +96,23 @@ with gr.Blocks() as demo:
             
             def atualizar_frameworks(lang):
                 fw_map = {"Python": ["FastAPI"], "TypeScript": ["Express"], "Java": ["Spring Boot"], "C#": [".NET Core"], "Rust": ["Axum"]}
-                return gr.update(choices=fw_map.get(lang, ["FastAPI"]), value=fw_map.get(lang, ["FastAPI"]))
+                return gr.update(choices=fw_map.get(lang, ["FastAPI"]), value=fw_map.get(lang, ["FastAPI"])[0])
             linguagem.change(atualizar_frameworks, inputs=[linguagem], outputs=[framework])
             
             modo = gr.Radio(label="Operação de Engenharia", choices=["Construir Novo Sistema do Zero", "Evoluir/Refatorar Sistema Existente", "Corrigir Erro de Compilação (Debug Mode)"], value="Construir Novo Sistema do Zero")
             arquivos = gr.File(label="📎 Anexos (Imagens / Planilhas / OpenAPI)", file_count="multiple")
             
         with gr.Column(scale=2):
-            # 🔄 MODIFICADO DE gr.Box() PARA gr.Group() PARA REPARAR O ATTRIBUTEERROR
             with gr.Group() as p_novo:
                 gr.Markdown("#### Novo Projeto")
                 requisito = gr.Textbox(label="Requisitos do Software / Prompt", placeholder="Ex: API de e-commerce com carrinho...", lines=4)
                 nome_projeto = gr.Textbox(label="Nome da Pasta do Projeto", value="api_enterprise_service")
                 
-            # 🔄 MODIFICADO DE gr.Box() PARA gr.Group() PARA REPARAR O ATTRIBUTEERROR
             with gr.Group(visible=False) as p_existente:
                 gr.Markdown("#### Seleção de Projeto Salvo")
-                projeto_existente = gr.Dropdown(label="Escolha o Projeto Alvo", choices=listar_sistemas(), value=listar_sistemas())
+                opcoes_sistemas = listar_sistemas()
+                # 🔄 CORREÇÃO DO VALUE: Passando explicitamente a string do primeiro item em vez da lista bruta
+                projeto_existente = gr.Dropdown(label="Escolha o Projeto Alvo", choices=opcoes_sistemas, value=opcoes_sistemas[0])
                 
                 with gr.Tab("🚀 Injetar Nova Funcionalidade") as tab_evo:
                     nova_funcionalidade = gr.Textbox(label="Instruções de Evolução Incremental", placeholder="Ex: Adicione uma rota GET /historico...", lines=3)
@@ -136,5 +136,5 @@ with gr.Blocks() as demo:
     )
 
 if __name__ == "__main__":
-    # 🔄 PARÂMETRO THEME INJETADO DIRETAMENTE NO LAUNCH CONFORME AS NOVAS DIRETRIZES
-    demo.launch(server_name="0.0.0.0", show_api=False, theme=gr.themes.Soft())
+    # 🔄 CORREÇÃO DO LAUNCH: Removido o argumento depreciado 'show_api'
+    demo.launch(server_name="0.0.0.0", theme=gr.themes.Soft())
