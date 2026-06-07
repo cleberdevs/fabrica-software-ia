@@ -52,7 +52,7 @@ def obter_llm_dinamica(nome_modelo: str):
         return ChatOpenAI(model="qwen/qwen3-coder:free", **base)
     elif "pro" in nome_modelo.lower():
         # Chief: melhor raciocínio gratuito
-        return ChatOpenAI(model="deepseek/deepseek-r1:free", **base)
+        return ChatOpenAI(model="google/gemini-2.5-pro-exp-03-25:free", **base)
     else:
         # Quality gate e testes: rápido e preciso
         return ChatOpenAI(model="google/gemini-2.5-flash-preview:free", **base)
