@@ -1,5 +1,8 @@
-import streamlit as st
-import dotenv, pandas as pd, base64, os
+import gradio as gr
+import dotenv
+import pandas as pd
+import base64
+import os
 from pathlib import Path
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage
@@ -7,92 +10,127 @@ from grafo import app, pool_manager, ler_codigo_da_pasta_legada
 from exporter import exportar_para_estrutura_clean_arch
 
 dotenv.load_dotenv()
-st.set_page_config(page_title="Fábrica AI Enterprise", page_icon="🏭", layout="wide")
-st.title("🏭 Fábrica de Software Autônoma Enterprise")
 
-DIR_PROJ = Path("projetos_fabrica"); DIR_PROJ.mkdir(exist_ok=True)
+DIR_PROJ = Path("projetos_fabrica")
+DIR_PROJ.mkdir(exist_ok=True)
 
-st.sidebar.markdown("### 🧠 Distribuição de Inteligência Ativa")
-st.sidebar.success("📋 Tier 0 Chief: **Gemini 2.5 Pro**")
-st.sidebar.info("🤖 Tier 2 Dev: **Qwen 3 Coder (Free)**")
-st.sidebar.warning("🔍 Tier 3 Auditor: **Gemini 2.5 Flash**")
-st.sidebar.warning("🧪 QA & Writer: **Gemini 2.5 Flash**")
+def listar_sistemas():
+    return [p.name for p in DIR_PROJ.iterdir() if p.is_dir()] or ["Nenhum projeto encontrado"]
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 💻 Matriz de Tecnologia")
-linguagem_escolhida = st.sidebar.selectbox("Selecione a Linguagem-Alvo:", ["Python", "TypeScript", "Java", "C#", "Rust"])
-frameworks_disponiveis = {"Python": ["FastAPI"], "TypeScript": ["Express"], "Java": ["Spring Boot"], "C#": [".NET Core"], "Rust": ["Axum"]}
-framework_escolhido = st.sidebar.selectbox("Selecione o Framework Web:", frameworks_disponiveis.get(linguagem_escolhida, ["FastAPI"]))
-
-modo = st.radio("Operação de Engenharia:", ["Construir Novo Sistema do Zero", "Evoluir/Refatorar Sistema Existente", "Corrigir Erro de Compilação (Debug Mode)"])
-arquivos = st.file_uploader("📎 Anexos (Imagens/Planilhas/Especificações):", type=["png", "jpg", "jpeg", "csv", "xlsx", "json", "yaml"], accept_multiple_files=True)
-
-codigo_legado, hist_erros, modo_git, projeto_alvo = "", [], False, None
-
-if modo == "Construir Novo Sistema do Zero":
-    requisito = st.text_area("Descreva os requisitos de negócio ou cole a especificação:")
-    nome_p = st.text_input("Nome da pasta do projeto:", value="api_enterprise_service")
-    projeto_alvo = DIR_PROJ / nome_p
-else:
-    sistemas = [p.name for p in DIR_PROJ.iterdir() if p.is_dir()]
-    if not sistemas: st.error("Nenhum projeto localizado em 'projetos_fabrica/'.")
-    else:
-        sel = st.selectbox("Selecione o projeto alvo:", sistemas)
-        projeto_alvo = DIR_PROJ / sel
-        modo_git = True
-        if modo == "Debug Mode":
-            requisito = f"FIX BUG. Código:\n{st.text_area('Código:')}"
-            hist_erros = [f"Log:\n{st.text_area('Erro:')}"]
-        else:
-            requisito = st.text_area("Descreva a NOVA funcionalidade incremental:")
-            codigo_legado = ler_codigo_da_pasta_legada(str(projeto_alvo))
-
-if st.button("⚡ Iniciar Linha de Produção", type="primary") and projeto_alvo and requisito:
+def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_quebrado, erro_log, nova_funcionalidade, arquivos, linguagem, framework):
+    if not requisito and modo == "Construir Novo Sistema do Zero":
+        return "❌ Erro: Descreva os requisitos do novo software."
+        
     ctx_arq = ""
-    for f in arquivos or []:
-        ext = f.name.split('.')[-1]
-        if ext in ['csv', 'xlsx']:
-            df = pd.read_csv(f) if ext == 'csv' else pd.read_excel(f)
-            ctx_arq += f"\n### Planilha ({f.name}):\n{df.to_markdown(index=False)}\n"
-        elif ext in ['json', 'yaml']:
-            ctx_arq += f"\n### Contrato ({f.name}):\n{f.read().decode('utf-8')}\n"
-        else:
-            b64 = base64.b64encode(f.read()).decode('utf-8')
-            chv = pool_manager.obter_chave("google")
-            ctx_arq += f"\n### Visão ({f.name}):\n{ChatGoogleGenerativeAI(model='gemini-2.5-flash', google_api_key=chv).invoke([HumanMessage(content=[{'type':'text','text':'Traduz o diagrama em especificacoes.'},{'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{b64}'}}])]).content}\n"
+    if arquivos:
+        for f in arquivos:
+            ext = f.name.split('.')[-1].lower()
+            if ext in ['csv', 'xlsx']:
+                df = pd.read_csv(f.name) if ext == 'csv' else pd.read_excel(f.name)
+                ctx_arq += f"\n### Planilha ({f.name}):\n{df.to_markdown(index=False)}\n"
+            elif ext in ['json', 'yaml']:
+                with open(f.name, "r", encoding="utf-8") as file_data:
+                    ctx_arq += f"\n### Contrato ({f.name}):\n{file_data.read()}\n"
+            else:
+                with open(f.name, "rb") as img_file:
+                    b64 = base64.b64encode(img_file.read()).decode('utf-8')
+                chv = pool_manager.obter_chave("google")
+                ctx_arq += f"\n### Visão ({f.name}):\n{ChatGoogleGenerativeAI(model='gemini-2.5-flash', google_api_key=chv).invoke([HumanMessage(content=[{'type':'text','text':'Traduz o diagrama em especificacoes.'},{'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{b64}'}}])]).content}\n"
 
-    inputs = {"requisito": requisito, "codigo_legado": codigo_legado, "contexto_arquivos": ctx_arq, "historico_erros": hist_erros, "status_passo": "dev", "modelo_selecionado": "qwen", "linguagem_selecionada": linguagem_escolhida, "framework_selecionado": framework_escolhido}
-    
-    st.write("⚙️ Orquestrando Tiers Híbridos (Gemini 2.5 + Qwen 3 Coder)...")
-    container_scores = st.container()
+    codigo_legado, hist_erros, e_correcao = "", [], False
+    if modo == "Construir Novo Sistema do Zero":
+        projeto_final = DIR_PROJ / nome_projeto
+        req_final = requisito
+    elif modo == "Corrigir Erro de Compilação (Debug Mode)":
+        if projeto_existente == "Nenhum projeto encontrado": return "❌ Selecione um projeto válido."
+        projeto_final = DIR_PROJ / projeto_existente
+        req_final = f"CORREÇÃO DE BUG. Código:\n{codigo_quebrado}"
+        hist_erros = [f"Log:\n{erro_log}"]
+        e_correcao = True
+    else:
+        if projeto_existente == "Nenhum projeto encontrado": return "❌ Selecione um projeto válido."
+        projeto_final = DIR_PROJ / projeto_existente
+        req_final = nova_funcionalidade
+        codigo_legado = ler_codigo_da_pasta_legada(str(projeto_final))
+        e_correcao = True
+
+    inputs = {
+        "requisito": req_final, 
+        "codigo_legado": codigo_legado, 
+        "contexto_arquivos": ctx_arq, 
+        "historico_erros": hist_erros, 
+        "status_passo": "dev", 
+        "modelo_selecionado": "qwen", 
+        "linguagem_selecionada": linguagem, 
+        "framework_selecionado": framework
+    }
     
     try:
-        for output in app.stream(inputs):
-            for node, state in output.items():
-                if node == "quality_gate" and "relatorio_qualidade" in state and state["relatorio_qualidade"]:
-                    rep = state["relatorio_qualidade"]
-                    with container_scores:
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("✨ Score Clean Code", f"{rep.score_clean_code}/100"); col1.progress(rep.score_clean_code/100)
-                        col2.metric("🏗️ Score Clean Arch", f"{rep.score_arquitetura}/100"); col2.progress(rep.score_arquitetura/100)
-                        media = (rep.score_clean_code + rep.score_arquitetura)/2
-                        col3.metric("📈 Média", f"{media}/100")
-                        if media < 80: st.error(f"⚠️ Rejeitado: {rep.justificativa_critica}")
-                        else: st.success(f"💯 Parecer: {rep.justificativa_critica}")
-        
-        estado_final = state
-        if estado_final.get("status_passo") == "sucesso" or "codigo_producao" in estado_final:
+        state = app.invoke(inputs)
+        if state.get("status_passo") == "sucesso" or "codigo_producao" in state:
             chv_g = pool_manager.obter_chave("google")
             llm_utils = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=chv_g)
-            prod = estado_final["codigo_producao"]
+            prod = state["codigo_producao"]
             
-            docs = llm_utils.invoke(f"Gere o README.md completo com Docker e diagramas Mermaid para o sistema {linguagem_escolhida}/{framework_escolhido}:\nDomínio: {prod.camada_dominio}\nAplicação: {prod.camada_aplicacao}\nWeb: {prod.camada_infra_web}").content
+            docs = llm_utils.invoke(f"Gere o README.md completo com Docker e diagramas Mermaid para o sistema {linguagem}/{framework}:\nDomínio: {prod.camada_dominio}\nAplicação: {prod.camada_aplicacao}\nWeb: {prod.camada_infra_web}").content
             swag = llm_utils.invoke(f"Retorne APENAS o JSON OpenAPI v3 cru para as rotas sem markdown:\n{prod.camada_infra_web}").content
             
-            sync = exportar_para_estrutura_clean_arch(prod, estado_final["codigo_teste"], str(projeto_alvo), docs, swag, linguagem_escolhida, framework_escolhido, e_correcao=modo_git)
-            st.balloons(); st.success(f"🎉 Entrega Finalizada na pasta: `{projeto_alvo}`"); st.markdown("---"); st.markdown(docs)
-            if sync: st.success("☁️ GitHub Sincronizado com sucesso!")
-        else: st.error("Falha nos guardrails.")
-    except Exception as e: st.error(f"Erro Crítico: {e}")
+            sync = exportar_para_estrutura_clean_arch(prod, state["codigo_teste"], str(projeto_final), docs, swag, linguagem, framework, e_correcao=e_correcao)
+            res_git = "☁️ Repositório criado/atualizado com sucesso no GitHub!" if sync else "💾 Salvo localmente."
+            return f"🎉 **SUCESSO EXCEPCIONAL!**\n\n**Pasta:** `{projeto_final}`\n**Status:** {res_git}\n\n## 📄 Manual Técnico Gerado (README.md):\n\n{docs}"
+        else:
+            return "❌ Falha nos guardrails de qualidade ou segurança da esteira."
+    except Exception as e:
+        return f"🚨 Erro Crítico na Esteira: {str(e)}"
 
+with gr.Blocks(theme=gr.themes.Soft()) as demo:
+    gr.Markdown("# 🏭 Fábrica de Software Autônoma Enterprise Pro")
+    gr.Markdown("Matriz Híbrida: **Gemini 2.5 Pro** ➔ **Qwen 3 Coder Free** ➔ **Gemini 2.5 Flash**")
+    
+    with gr.Row():
+        with gr.Column(scale=1):
+            gr.Markdown("### 🧰 Configuração Técnica")
+            linguagem = gr.Dropdown(label="Linguagem-Alvo", choices=["Python", "TypeScript", "Java", "C#", "Rust"], value="Python")
+            framework = gr.Dropdown(label="Framework Web", choices=["FastAPI", "Express", "Spring Boot", ".NET Core", "Axum"], value="FastAPI")
+            
+            def atualizar_frameworks(lang):
+                fw_map = {"Python": ["FastAPI"], "TypeScript": ["Express"], "Java": ["Spring Boot"], "C#": [".NET Core"], "Rust": ["Axum"]}
+                return gr.update(choices=fw_map.get(lang, ["FastAPI"]), value=fw_map.get(lang, ["FastAPI"]))
+            linguagem.change(atualizar_frameworks, inputs=[linguagem], outputs=[framework])
+            
+            modo = gr.Radio(label="Operação de Engenharia", choices=["Construir Novo Sistema do Zero", "Evoluir/Refatorar Sistema Existente", "Corrigir Erro de Compilação (Debug Mode)"], value="Construir Novo Sistema do Zero")
+            arquivos = gr.File(label="📎 Anexos (Imagens / Planilhas / OpenAPI)", file_count="multiple")
+            
+        with gr.Column(scale=2):
+            with gr.Box() as p_novo:
+                gr.Markdown("#### Novo Projeto")
+                requisito = gr.Textbox(label="Requisitos do Software / Prompt", placeholder="Ex: API de e-commerce com carrinho...", lines=4)
+                nome_projeto = gr.Textbox(label="Nome da Pasta do Projeto", value="api_enterprise_service")
+                
+            with gr.Box(visible=False) as p_existente:
+                gr.Markdown("#### Seleção de Projeto Salvo")
+                projeto_existente = gr.Dropdown(label="Escolha o Projeto Alvo", choices=listar_sistemas(), value=listar_sistemas())
+                
+                with gr.Tab("🚀 Injetar Nova Funcionalidade") as tab_evo:
+                    nova_funcionalidade = gr.Textbox(label="Instruções de Evolução Incremental", placeholder="Ex: Adicione uma rota GET /historico...", lines=3)
+                with gr.Tab("🚨 Debug Mode (Fix Bugs)") as tab_debug:
+                    codigo_quebrado = gr.Textbox(label="Trecho do Código com Defeito", lines=3)
+                    erro_log = gr.Textbox(label="Stack Trace / Erro do Terminal", lines=3)
 
+            def alternar_modos(m):
+                if m == "Construir Novo Sistema do Zero":
+                    return gr.update(visible=True), gr.update(visible=False)
+                return gr.update(visible=False), gr.update(visible=True)
+            modo.change(alternar_modos, inputs=[modo], outputs=[p_novo, p_existente])
+            
+            btn = gr.Button("⚡ Iniciar Linha de Produção", variant="primary")
+            output_text = gr.Markdown(value="💡 Aguardando comandos para iniciar a esteira corporativa...")
+
+    btn.click(
+        processar_execucao, 
+        inputs=[modo, requisito, nome_projeto, projeto_existente, codigo_quebrado, erro_log, nova_funcionalidade, arquivos, linguagem, framework], 
+        outputs=[output_text]
+    )
+
+if __name__ == "__main__":
+    demo.launch(server_name="0.0.0.0", show_api=False)
