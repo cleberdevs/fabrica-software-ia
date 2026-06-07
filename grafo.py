@@ -72,9 +72,10 @@ def obter_llm_openrouter(indice_modelo: int = 0):
     )
 
 def obter_llm_google(nome_modelo: str):
+    # Todos os modelos passam pelo OpenRouter — usa chave do OpenRouter
     base = {
         "temperature": 0.1,
-        "openai_api_key": pool_manager.obter_chave("google"),
+        "openai_api_key": pool_manager.obter_chave("openrouter"),
         "openai_api_base": "https://openrouter.ai/api/v1"
     }
     if "pro" in nome_modelo.lower():
@@ -144,7 +145,7 @@ def agente_chief_tier0(state):
             f"Estruture um plano detalhado para {state['linguagem_selecionada']} usando o framework {state['framework_selecionado']}."
         )
         return {"plano_do_chief": llm.invoke(prompt).content, "status_passo": "dev"}
-    return executar_com_failover(state, "google", acao)
+    return executar_com_failover(state, "openrouter", acao)
 
 def agente_desenvolvedor_tier2(state):
     prompt = (
@@ -175,7 +176,7 @@ def agente_quality_gate_tier3(state):
             f"{prod.camada_dominio}\n{prod.camada_aplicacao}\n{prod.camada_infra_web}"
         )
         return {"relatorio_qualidade": llm.invoke(prompt), "status_passo": "validar_score"}
-    return executar_com_failover(state, "google", acao)
+    return executar_com_failover(state, "openrouter", acao)
 
 def executar_sast_seguranca(state):
     prod = state["codigo_producao"]
@@ -200,7 +201,7 @@ def agente_gerador_testes(state):
             f"{state['linguagem_selecionada']}:\n{state['codigo_producao'].camada_infra_web}"
         )
         return {"codigo_teste": llm.invoke(prompt), "status_passo": "test_run"}
-    return executar_com_failover(state, "google", acao)
+    return executar_com_failover(state, "openrouter", acao)
 
 def executor_runtime_pytest(state):
     prod = state["codigo_producao"]
