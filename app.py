@@ -94,5 +94,5 @@ if st.button("⚡ Iniciar Linha de Produção", type="primary") and projeto_alvo
             if sync: st.success("☁️ GitHub Sincronizado com sucesso!")
         else: st.error("Falha nos guardrails.")
     except Exception as e: st.error(f"Erro Crítico: {e}")
-INTF
-echo "✨ Bloco 4 Finalizado! Fábrica 100% instalada com sucesso!"
+
+
