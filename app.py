@@ -37,7 +37,7 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
                     b64 = base64.b64encode(img_file.read()).decode('utf-8')
                 chv = pool_manager.obter_chave("openrouter")
                 llm_visao = ChatOpenAI(
-                    model="qwen/qwen2.5-vl-72b-instruct:free",
+                    model="google/gemma-4-31b-it:free",
                     openai_api_key=chv,
                     openai_api_base="https://openrouter.ai/api/v1"
                 )
@@ -76,7 +76,7 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
         if state.get("status_passo") == "sucesso" or "codigo_producao" in state:
             chv_g = pool_manager.obter_chave("openrouter")
             llm_utils = ChatOpenAI(
-                model="google/gemini-2.5-flash-preview:free",
+                model="google/gemma-4-31b-it:free",
                 openai_api_key=chv_g,
                 openai_api_base="https://openrouter.ai/api/v1"
             )
