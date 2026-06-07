@@ -23,6 +23,6 @@ jobs:
           git config --global user.name "GitHub Actions"
           
           # 🔀 OBSERVAÇÃO: Substitua SEU_USUARIO_HF e NOME_DO_SPACE no repositório final se necessário
-          git remote add hf https://root:$HF_TOKEN@huggingface.co/spaces/SEU_USUARIO_HF/NOME_DO_SPACE
+          git remote add hf https://root:$HF_TOKEN@huggingface.co/spaces/cleberfx/fabrica-software-ia
           
           git push --force hf main
