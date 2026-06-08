@@ -70,6 +70,7 @@ def obter_llm_openrouter(indice_modelo: int = 0):
     return ChatOpenAI(
         model=modelo,
         temperature=0.1,
+        max_tokens=8192,  # suficiente para JSON com 4 camadas de código
         openai_api_key=pool_manager.obter_chave("openrouter"),
         openai_api_base="https://openrouter.ai/api/v1"
     )
@@ -78,6 +79,7 @@ def obter_llm_google(nome_modelo: str):
     # Todos os modelos passam pelo OpenRouter — usa chave do OpenRouter
     base = {
         "temperature": 0.1,
+        "max_tokens": 4096,
         "openai_api_key": pool_manager.obter_chave("openrouter"),
         "openai_api_base": "https://openrouter.ai/api/v1"
     }
