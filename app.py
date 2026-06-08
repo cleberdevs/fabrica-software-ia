@@ -79,13 +79,35 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
         if state.get("status_passo") == "sucesso" or "codigo_producao" in state:
             chv_g = pool_manager.obter_chave("openrouter")
             llm_utils = ChatOpenAI(
-                model="google/gemma-4-31b-it:free",
+                model="google/gemini-2.5-flash-lite",
+                max_tokens=4096,
                 openai_api_key=chv_g,
                 openai_api_base="https://openrouter.ai/api/v1"
             )
             prod = state["codigo_producao"]
-            
-            docs = llm_utils.invoke(f"Gere o README.md completo com Docker e diagramas Mermaid para o sistema {linguagem}/{framework}:\nDomínio: {prod.camada_dominio}\nAplicação: {prod.camada_aplicacao}\nWeb: {prod.camada_infra_web}").content
+
+            prompt_docs = (
+                f"Gere o README.md completo com Docker e diagramas Mermaid v11 para o sistema {linguagem}/{framework}.\n"
+                f"Domínio: {prod.camada_dominio}\nAplicação: {prod.camada_aplicacao}\nWeb: {prod.camada_infra_web}\n\n"
+                "REGRAS OBRIGATÓRIAS para o diagrama Mermaid (classDiagram):\n"
+                "1. Use APENAS sintaxe Mermaid v11 válida\n"
+                "2. Nomes de classes sem espaços, acentos ou caracteres especiais\n"
+                "3. Tipos de atributos simples: string, int, float, bool, List, Dict\n"
+                "4. Métodos sem parênteses vazios duplos — use apenas nomeMetodo()\n"
+                "5. Relacionamentos: <|-- para herança, *-- para composição, o-- para agregação\n"
+                "6. Não use genericidade complexa como List~Pedido~ — use apenas List\n"
+                "7. Cada linha da classe em uma linha separada\n"
+                "Exemplo válido:\n"
+                "```mermaid\n"
+                "classDiagram\n"
+                "    class Pedido {\n"
+                "        +int id\n"
+                "        +string status\n"
+                "        +calcularTotal()\n"
+                "    }\n"
+                "```"
+            )
+            docs = llm_utils.invoke(prompt_docs).content
             swag = llm_utils.invoke(f"Retorne APENAS o JSON OpenAPI v3 cru para as rotas sem markdown:\n{prod.camada_infra_web}").content
             
             sync = exportar_para_estrutura_clean_arch(prod, state["codigo_teste"], str(projeto_final), docs, swag, linguagem, framework, e_correcao=e_correcao)
