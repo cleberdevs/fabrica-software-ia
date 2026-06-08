@@ -90,11 +90,38 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
             prompt_readme = (
                 f"Gere o README.md completo com instruções Docker para o sistema {linguagem}/{framework}.\n"
                 f"Domínio: {prod.camada_dominio}\nAplicação: {prod.camada_aplicacao}\nWeb: {prod.camada_infra_web}\n\n"
-                "IMPORTANTE: NÃO inclua nenhum bloco ```mermaid``` no README. "
-                "Os diagramas serão gerados separadamente. "
-                "Inclua apenas texto, código Docker/bash e tabelas markdown."
+                "REGRAS OBRIGATÓRIAS:\n"
+                "1. NÃO inclua nenhum bloco ```mermaid``` — os diagramas são gerados separadamente\n"
+                "2. Todo bloco de código deve ser fechado com ``` em uma linha isolada\n"
+                "3. NUNCA adicione texto após o fechamento de um bloco de código\n"
+                "4. Cada bloco ```bash ou ```yaml deve conter APENAS comandos/configurações, sem comentários em português dentro\n"
+                "5. Termine o README com uma seção ## Licença ou ## Contribuição — nunca termine dentro de um bloco de código\n"
+                "6. Não adicione observações, avisos ou notas fora das seções do README\n"
             )
-            readme_sem_diagramas = llm_utils.invoke(prompt_readme).content
+            readme_raw = llm_utils.invoke(prompt_readme).content
+
+            def sanitizar_markdown(texto: str) -> str:
+                """Fecha blocos de código abertos e remove texto após o último ```."""
+                linhas = texto.split("\n")
+                resultado = []
+                dentro_bloco = False
+                for linha in linhas:
+                    stripped = linha.strip()
+                    if stripped.startswith("```") and not dentro_bloco:
+                        dentro_bloco = True
+                        resultado.append(linha)
+                    elif stripped == "```" and dentro_bloco:
+                        dentro_bloco = False
+                        resultado.append(linha)
+                    elif dentro_bloco and not stripped.startswith("```"):
+                        resultado.append(linha)
+                    elif not dentro_bloco:
+                        resultado.append(linha)
+                if dentro_bloco:
+                    resultado.append("```")
+                return "\n".join(resultado)
+
+            readme_sem_diagramas = sanitizar_markdown(readme_raw)
 
             # ── Diagrama de classes via JSON estruturado ──────────────────────
             prompt_classes_json = (
