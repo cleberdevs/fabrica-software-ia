@@ -1,15 +1,18 @@
-import gradio as gr
 import dotenv
+import os
+
+# Carrega .env ANTES de qualquer outro import para garantir
+# que LANGCHAIN_API_KEY e LANGCHAIN_TRACING_V2 estejam disponíveis
+dotenv.load_dotenv()
+
+import gradio as gr
 import pandas as pd
 import base64
-import os
 from pathlib import Path
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 from grafo import app, pool_manager, ler_codigo_da_pasta_legada
 from exporter import exportar_para_estrutura_clean_arch
-
-dotenv.load_dotenv()
 
 DIR_PROJ = Path("projetos_fabrica")
 DIR_PROJ.mkdir(exist_ok=True)
