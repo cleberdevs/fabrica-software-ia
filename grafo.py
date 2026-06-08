@@ -56,9 +56,9 @@ class EstadoEngenharia(TypedDict):
 
 # Sequência de fallback para o agente dev quando o modelo primário é bloqueado por rate limit
 MODELOS_OPENROUTER_FALLBACK = [
-    "qwen/qwen3-coder",          # ~$0.30/1M tokens — especialista em código
-    "deepseek/deepseek-chat",    # ~$0.14/1M tokens — fallback barato
-    "google/gemini-2.5-flash-lite",   # ~$0.075/1M tokens — mais barato ainda
+    "deepseek/deepseek-v4-pro",  # $0.43/1M — melhor custo/perf, 80.6% SWE-bench
+    "moonshot/kimi-k2",          # $0.75/1M — agêntico, long-horizon, 80.2% SWE-bench
+    "qwen/qwen3-coder-next",     # $0.11/1M — MoE eficiente, fallback barato
 ]
 
 def obter_llm_openrouter(indice_modelo: int = 0):
