@@ -86,47 +86,131 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
             )
             prod = state["codigo_producao"]
 
-            prompt_docs = (
-                f"Gere o README.md completo com Docker e diagramas Mermaid v11 para o sistema {linguagem}/{framework}.\n"
+            # ── README sem diagramas (o modelo não gera mermaid) ──────────────
+            prompt_readme = (
+                f"Gere o README.md completo com instruções Docker para o sistema {linguagem}/{framework}.\n"
                 f"Domínio: {prod.camada_dominio}\nAplicação: {prod.camada_aplicacao}\nWeb: {prod.camada_infra_web}\n\n"
-                "REGRAS OBRIGATÓRIAS para o diagrama Mermaid (classDiagram):\n"
-                "1. Use APENAS sintaxe Mermaid v11 válida\n"
-                "2. Nomes de classes sem espaços, acentos ou caracteres especiais\n"
-                "3. Tipos de atributos SIMPLES apenas: string, int, float, bool, List, Dict, datetime\n"
-                "4. NUNCA use Optional~tipo~, List~tipo~, Dict~k,v~ — proibido, causa syntax error\n"
-                "5. Para Optional use apenas o tipo base: int em vez de Optional~int~\n"
-                "6. Métodos sem parênteses vazios duplos — use apenas nomeMetodo()\n"
-                "7. Relacionamentos: <|-- para herança, *-- para composição, o-- para agregação\n"
-                "8. Cada linha da classe em uma linha separada\n"
-                "9. Underscores duplos em métodos como __init__ podem ser escritos como init()\n"
-                "REGRAS para o diagrama de deploy Docker (use flowchart TD):\n"
-                "10. Use flowchart TD para o diagrama de deploy — NUNCA graph TD\n"
-                "11. Nomes de nós sem espaços — use underscore: API_Server, Postgres_DB\n"
-                "12. Labels de nós entre colchetes simples: API_Server[API Server]\n"
-                "13. Setas simples: A --> B ou A -->|label| B\n"
-                "14. Subgraphs com nome simples sem acentos: subgraph Docker_Network\n"
-                "15. Feche todo subgraph com end na mesma indentação\n"
-                "Exemplo válido de deploy:\n"
-                "```mermaid\n"
-                "flowchart TD\n"
-                "    subgraph Docker_Compose\n"
-                "        API[API FastAPI]\n"
-                "        DB[(PostgreSQL)]\n"
-                "    end\n"
-                "    Client-->API\n"
-                "    API-->DB\n"
-                "```\n"
-                "Exemplo válido de classDiagram:\n"
-                "```mermaid\n"
-                "classDiagram\n"
-                "    class Pedido {\n"
-                "        +int id\n"
-                "        +string status\n"
-                "        +calcularTotal()\n"
-                "    }\n"
-                "```"
+                "IMPORTANTE: NÃO inclua nenhum bloco ```mermaid``` no README. "
+                "Os diagramas serão gerados separadamente. "
+                "Inclua apenas texto, código Docker/bash e tabelas markdown."
             )
-            docs = llm_utils.invoke(prompt_docs).content
+            readme_sem_diagramas = llm_utils.invoke(prompt_readme).content
+
+            # ── Diagrama de classes via JSON estruturado ──────────────────────
+            prompt_classes_json = (
+                f"Analise o código abaixo e retorne APENAS um JSON válido (sem markdown, sem texto) "
+                f"descrevendo as classes para um classDiagram Mermaid v11.\n"
+                f"Código:\n{prod.camada_dominio}\n{prod.camada_aplicacao}\n\n"
+                "Formato EXATO do JSON (sem desvios):\n"
+                '{"classes":[{"name":"NomeSemEspacos","attributes":["int id","str titulo"],"methods":["salvar()","buscar(id)"]}],'
+                '"relations":[{"from":"ClasseA","to":"ClasseB","type":"inheritance"}]}\n'
+                "Tipos permitidos em attributes: int, str, float, bool, List, Dict, datetime\n"
+                "Tipos de relação: inheritance, composition, aggregation, association\n"
+                "NUNCA use Optional~tipo~, List~tipo~ ou qualquer genericidade com ~"
+            )
+            import json, re
+
+            def gerar_mermaid_classes(codigo_json: str) -> str:
+                try:
+                    clean = re.sub(r"```[a-z]*|```", "", codigo_json).strip()
+                    data = json.loads(clean)
+                except Exception:
+                    return ""
+                rel_map = {
+                    "inheritance": "<|--",
+                    "composition": "*--",
+                    "aggregation": "o--",
+                    "association": "-->"
+                }
+                lines = ["classDiagram"]
+                for cls in data.get("classes", []):
+                    name = re.sub(r"[^A-Za-z0-9_]", "_", cls["name"])
+                    lines.append(f"    class {name} {{")
+                    for attr in cls.get("attributes", []):
+                        safe = re.sub(r"[~<>]", "", attr).strip()
+                        lines.append(f"        +{safe}")
+                    for meth in cls.get("methods", []):
+                        safe = re.sub(r"[~<>]", "", meth).strip()
+                        if not safe.endswith(")"):
+                            safe += "()"
+                        lines.append(f"        +{safe}")
+                    lines.append("    }")
+                for rel in data.get("relations", []):
+                    arrow = rel_map.get(rel.get("type", "association"), "-->")
+                    frm = re.sub(r"[^A-Za-z0-9_]", "_", rel["from"])
+                    to  = re.sub(r"[^A-Za-z0-9_]", "_", rel["to"])
+                    lines.append(f"    {frm} {arrow} {to}")
+                return "\n".join(lines)
+
+            classes_json = llm_utils.invoke(prompt_classes_json).content
+            mermaid_classes = gerar_mermaid_classes(classes_json)
+
+            # ── Diagrama de deploy Docker via JSON estruturado ────────────────
+            prompt_deploy_json = (
+                f"Analise o sistema {linguagem}/{framework} e retorne APENAS um JSON válido (sem markdown) "
+                "descrevendo os containers Docker para um flowchart Mermaid v11.\n"
+                '{"nodes":[{"id":"API","label":"API FastAPI","shape":"rect"},{"id":"DB","label":"PostgreSQL","shape":"cylinder"}],'
+                '"edges":[{"from":"Client","to":"API","label":"HTTP"},{"from":"API","to":"DB","label":"SQL"}],'
+                '"subgraphs":[{"id":"Docker_Compose","label":"Docker Compose","nodes":["API","DB"]}]}\n'
+                "Shapes: rect, cylinder, diamond, rounded\n"
+                "IDs sem espaços ou acentos"
+            )
+
+            def gerar_mermaid_deploy(codigo_json: str) -> str:
+                try:
+                    clean = re.sub(r"```[a-z]*|```", "", codigo_json).strip()
+                    data = json.loads(clean)
+                except Exception:
+                    return ""
+                shape_map = {
+                    "rect":     ("[", "]"),
+                    "cylinder": ("[(", ")]"),
+                    "diamond":  ("{", "}"),
+                    "rounded":  ("(", ")"),
+                }
+                lines = ["flowchart TD"]
+                for sg in data.get("subgraphs", []):
+                    sg_id    = re.sub(r"[^A-Za-z0-9_]", "_", sg["id"])
+                    sg_label = sg.get("label", sg_id)
+                    lines.append(f"    subgraph {sg_id}[{sg_label}]")
+                    for nid in sg.get("nodes", []):
+                        node = next((n for n in data["nodes"] if n["id"] == nid), None)
+                        if node:
+                            nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
+                            lbl = node.get("label", nid_safe)
+                            o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
+                            lines.append(f"        {nid_safe}{o}{lbl}{c}")
+                    lines.append("    end")
+                subgraph_nodes = {n for sg in data.get("subgraphs", []) for n in sg.get("nodes", [])}
+                for node in data.get("nodes", []):
+                    if node["id"] not in subgraph_nodes:
+                        nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
+                        lbl = node.get("label", nid_safe)
+                        o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
+                        lines.append(f"    {nid_safe}{o}{lbl}{c}")
+                for edge in data.get("edges", []):
+                    frm = re.sub(r"[^A-Za-z0-9_]", "_", edge["from"])
+                    to  = re.sub(r"[^A-Za-z0-9_]", "_", edge["to"])
+                    lbl = edge.get("label", "")
+                    arrow = f"-->|{lbl}|" if lbl else "-->"
+                    lines.append(f"    {frm} {arrow} {to}")
+                return "\n".join(lines)
+
+            deploy_json  = llm_utils.invoke(prompt_deploy_json).content
+            mermaid_deploy = gerar_mermaid_deploy(deploy_json)
+
+            # ── Monta README final com diagramas válidos ──────────────────────
+            diagrama_classes = (
+                "## Diagrama de Classes\n\n"
+                "```mermaid\n" + mermaid_classes + "\n```\n"
+            ) if mermaid_classes else ""
+
+            diagrama_deploy = (
+                "## Deploy com Docker\n\n"
+                "```mermaid\n" + mermaid_deploy + "\n```\n"
+            ) if mermaid_deploy else ""
+
+            docs = readme_sem_diagramas + "\n\n" + diagrama_classes + "\n" + diagrama_deploy
             swag = llm_utils.invoke(f"Retorne APENAS o JSON OpenAPI v3 cru para as rotas sem markdown:\n{prod.camada_infra_web}").content
             
             sync = exportar_para_estrutura_clean_arch(prod, state["codigo_teste"], str(projeto_final), docs, swag, linguagem, framework, e_correcao=e_correcao)
