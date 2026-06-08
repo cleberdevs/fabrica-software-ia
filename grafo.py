@@ -1,4 +1,7 @@
 import subprocess, os
+from dotenv import load_dotenv
+
+load_dotenv()  # carrega o .env antes de qualquer leitura de os.getenv
 from pathlib import Path
 from typing import List, TypedDict
 from pydantic import BaseModel, Field
