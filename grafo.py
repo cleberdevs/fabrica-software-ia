@@ -150,22 +150,50 @@ def agente_chief_tier0(state):
         return {"plano_do_chief": llm.invoke(prompt).content, "status_passo": "dev"}
     return executar_com_failover(state, "openrouter", acao)
 
+def _parsear_componente(texto: str) -> ComponenteMultiLinguagem:
+    """Extrai JSON do texto mesmo que o modelo adicione explicações ao redor."""
+    import json, re
+    # Tenta parse direto
+    try:
+        return ComponenteMultiLinguagem(**json.loads(texto))
+    except Exception:
+        pass
+    # Tenta extrair bloco ```json ... ```
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", texto, re.DOTALL)
+    if match:
+        return ComponenteMultiLinguagem(**json.loads(match.group(1)))
+    # Tenta encontrar o primeiro { ... } válido
+    match = re.search(r"\{.*\}", texto, re.DOTALL)
+    if match:
+        return ComponenteMultiLinguagem(**json.loads(match.group(0)))
+    raise ValueError(f"Não foi possível extrair JSON do output do modelo:\n{texto[:300]}")
+
+
 def agente_desenvolvedor_tier2(state):
-    prompt = (
-        f"Você é o Especialista Dev (Tier 2). Implemente o código limpo completo nas camadas usando "
+    schema = ComponenteMultiLinguagem.model_json_schema()
+    system_prompt = (
+        "Você é um Especialista Dev (Tier 2) de alto nível. "
+        "Responda EXCLUSIVAMENTE com um objeto JSON válido seguindo este schema — "
+        "sem texto antes, sem texto depois, sem blocos markdown:\n"
+        f"{schema}"
+    )
+    user_prompt = (
+        f"Implemente o código limpo completo nas camadas usando "
         f"{state['linguagem_selecionada']} e {state['framework_selecionado']}. "
         f"Siga o plano do Chief:\n{state['plano_do_chief']}\n"
         f"Feedbacks para correção:\n{state.get('historico_erros')}"
     )
+    from langchain_core.messages import SystemMessage, HumanMessage as HMsg
 
     def acao():
-        llm = obter_llm_openrouter(0).with_structured_output(ComponenteMultiLinguagem)
-        return {"codigo_producao": llm.invoke(prompt), "status_passo": "quality_gate"}
+        llm = obter_llm_openrouter(0)
+        resp = llm.invoke([SystemMessage(content=system_prompt), HMsg(content=user_prompt)])
+        return {"codigo_producao": _parsear_componente(resp.content), "status_passo": "quality_gate"}
 
     def acao_com_modelo(tentativa):
-        # Testa modelos alternativos nas tentativas avançadas
-        llm = obter_llm_openrouter(tentativa).with_structured_output(ComponenteMultiLinguagem)
-        return {"codigo_producao": llm.invoke(prompt), "status_passo": "quality_gate"}
+        llm = obter_llm_openrouter(tentativa)
+        resp = llm.invoke([SystemMessage(content=system_prompt), HMsg(content=user_prompt)])
+        return {"codigo_producao": _parsear_componente(resp.content), "status_passo": "quality_gate"}
 
     return executar_com_failover(state, "openrouter", acao, acao_com_modelo)
 
