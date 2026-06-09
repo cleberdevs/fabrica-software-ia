@@ -298,7 +298,7 @@ def _gerar_mermaid_classes(codigo_json: str) -> str:
         lines.append(f"  {frm} {arrow} {to}")
     return "\n".join(lines)
 
-
+#
 def _gerar_mermaid_deploy(codigo_json: str) -> str:
     import json, re
     try:
