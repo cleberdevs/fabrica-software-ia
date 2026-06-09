@@ -1,18 +1,40 @@
 import subprocess, os
-from dotenv import load_dotenv
 
-load_dotenv()  # carrega o .env antes de qualquer leitura de os.getenv
+# ── LangSmith: DEVE ser configurado ANTES de qualquer import LangChain/LangGraph ──
+# No Hugging Face Spaces, as variáveis vêm dos Secrets do painel (não de .env)
+# O dotenv.load_dotenv() apenas complementa para ambiente local
+from dotenv import load_dotenv
+load_dotenv()  # carrega .env local (no HF Spaces é ignorado — secrets já estão no os.environ)
+
+_langchain_key = os.environ.get("LANGCHAIN_API_KEY", "")
+_tracing       = os.environ.get("LANGCHAIN_TRACING_V2", "false")
+_project       = os.environ.get("LANGCHAIN_PROJECT", "fabrica-key-rotation")
+_endpoint      = os.environ.get("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
+
+if _langchain_key:
+    os.environ["LANGCHAIN_API_KEY"]      = _langchain_key
+    os.environ["LANGCHAIN_TRACING_V2"]   = _tracing
+    os.environ["LANGCHAIN_PROJECT"]      = _project
+    os.environ["LANGCHAIN_ENDPOINT"]     = _endpoint
+    print(f"[LangSmith] ✅ Tracing ativo — projeto: {_project}")
+else:
+    # Garante que o tracing fique desligado se não há chave (evita erros silenciosos)
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+    print("[LangSmith] ⚠️  LANGCHAIN_API_KEY não encontrada — tracing desativado.")
+# ────────────────────────────────────────────────────────────────────────────────
+
 from pathlib import Path
 from typing import List, TypedDict
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
 
+
 class KeyPoolManager:
     def __init__(self):
         self.pools = {
-            "google": [k.strip() for k in os.getenv("GOOGLE_API_KEY", "").split(",") if k.strip()],
-            "openrouter": [k.strip() for k in os.getenv("OPENROUTER_API_KEY", "").split(",") if k.strip()]
+            "google":      [k.strip() for k in os.getenv("GOOGLE_API_KEY",      "").split(",") if k.strip()],
+            "openrouter":  [k.strip() for k in os.getenv("OPENROUTER_API_KEY",  "").split(",") if k.strip()]
         }
         self.indices = {"google": 0, "openrouter": 0}
 
@@ -27,29 +49,34 @@ class KeyPoolManager:
         pool = self.pools.get(prov, [])
         if len(pool) > 1:
             self.indices[prov] = (self.indices.get(prov, 0) + 1) % len(pool)
-            return True  # rotacionou para uma chave diferente
-        return False  # pool unitário, não adianta rotacionar
+            return True
+        return False
 
     def tamanho_pool(self, prov: str) -> int:
         return len(self.pools.get(prov, []))
 
+
 pool_manager = KeyPoolManager()
 
+
 class ComponenteMultiLinguagem(BaseModel):
-    camada_dominio: str = Field(description="Entidades puras do domínio e contratos de interfaces.")
-    camada_aplicacao: str = Field(description="Casos de uso/Serviços que orquestram as regras de negócio.")
-    camada_infra_banco: str = Field(description="Implementação física de persistência usando ORM nativo.")
-    camada_infra_web: str = Field(description="Controladores HTTP/Rotas utilizando o Framework Web corporativo escolhido.")
+    camada_dominio:          str = Field(description="Entidades puras do domínio e contratos de interfaces.")
+    camada_aplicacao:        str = Field(description="Casos de uso/Serviços que orquestram as regras de negócio.")
+    camada_infra_banco:      str = Field(description="Implementação física de persistência usando ORM nativo.")
+    camada_infra_web:        str = Field(description="Controladores HTTP/Rotas utilizando o Framework Web corporativo escolhido.")
     gerenciador_dependencias: str = Field(description="Arquivo completo de dependências: requirements.txt, package.json, pom.xml, .csproj ou Cargo.toml.")
-    justificativa: str = Field(description="Defesa arquitetural detalhada.")
+    justificativa:           str = Field(description="Defesa arquitetural detalhada.")
+
 
 class UnitTestComponent(BaseModel):
     codigo_teste: str = Field(description="Suite de testes robusta utilizando o framework de testes nativo da linguagem.")
 
+
 class QualityReport(BaseModel):
-    score_clean_code: int = Field(description="Nota de 0 a 100.")
-    score_arquitetura: int = Field(description="Nota de 0 a 100.")
+    score_clean_code:    int = Field(description="Nota de 0 a 100.")
+    score_arquitetura:   int = Field(description="Nota de 0 a 100.")
     justificativa_critica: str = Field(description="Feedback de auditoria para o time.")
+
 
 class EstadoEngenharia(TypedDict):
     requisito: str; codigo_legado: str; contexto_arquivos: str; plano_do_chief: str
@@ -57,12 +84,14 @@ class EstadoEngenharia(TypedDict):
     codigo_producao: ComponenteMultiLinguagem; codigo_teste: UnitTestComponent
     relatorio_qualidade: QualityReport; historico_erros: List[str]; status_passo: str
 
+
 # Sequência de fallback para o agente dev quando o modelo primário é bloqueado por rate limit
 MODELOS_OPENROUTER_FALLBACK = [
-    "deepseek/deepseek-v4-pro",  # $0.43/1M — melhor custo/perf, 80.6% SWE-bench
-    "moonshot/kimi-k2",          # $0.75/1M — agêntico, long-horizon, 80.2% SWE-bench
-    "qwen/qwen3-coder-next",     # $0.11/1M — MoE eficiente, fallback barato
+    "deepseek/deepseek-v4-pro",   # $0.43/1M — melhor custo/perf, 80.6% SWE-bench
+    "moonshot/kimi-k2",           # $0.75/1M — agêntico, long-horizon, 80.2% SWE-bench
+    "qwen/qwen3-coder-next",      # $0.11/1M — MoE eficiente, fallback barato
 ]
+
 
 def obter_llm_openrouter(indice_modelo: int = 0):
     modelo = MODELOS_OPENROUTER_FALLBACK[indice_modelo % len(MODELOS_OPENROUTER_FALLBACK)]
@@ -70,23 +99,22 @@ def obter_llm_openrouter(indice_modelo: int = 0):
     return ChatOpenAI(
         model=modelo,
         temperature=0.1,
-        max_tokens=8192,  # suficiente para JSON com 4 camadas de código
+        max_tokens=8192,
         openai_api_key=pool_manager.obter_chave("openrouter"),
         openai_api_base="https://openrouter.ai/api/v1"
     )
 
+
 def obter_llm_google(nome_modelo: str):
-    # Todos os modelos passam pelo OpenRouter — usa chave do OpenRouter
     base = {
         "temperature": 0.1,
         "max_tokens": 4096,
         "openai_api_key": pool_manager.obter_chave("openrouter"),
         "openai_api_base": "https://openrouter.ai/api/v1"
     }
-    if "pro" in nome_modelo.lower():
-        return ChatOpenAI(model="google/gemini-2.5-flash-lite", **base)  # ~$0.075/1M tokens
-    else:
-        return ChatOpenAI(model="google/gemini-2.5-flash-lite", **base)  # ~$0.075/1M tokens
+    # Ambos os tiers usam gemini-2.5-flash-lite via OpenRouter (~$0.075/1M tokens)
+    return ChatOpenAI(model="google/gemini-2.5-flash-lite", **base)
+
 
 def executar_com_failover(state, prov_nome, bloco, bloco_com_modelo=None):
     """
@@ -100,7 +128,6 @@ def executar_com_failover(state, prov_nome, bloco, bloco_com_modelo=None):
 
     for tentativa in range(5):
         try:
-            # Nas últimas tentativas, tenta um modelo alternativo se disponível
             if tentativa >= 2 and bloco_com_modelo is not None:
                 print(f"[failover] Tentando modelo alternativo (tentativa {tentativa + 1}/5)...")
                 return bloco_com_modelo(tentativa)
@@ -117,19 +144,20 @@ def executar_com_failover(state, prov_nome, bloco, bloco_com_modelo=None):
                 rotacionou = pool_manager.rotacionar(prov_nome)
                 msg = "rotacionando chave" if rotacionou else "pool unitário, chave inválida"
                 print(f"[failover] Erro de autenticação em {prov_nome}: {msg}")
-                raise e  # auth inválido não tem como recuperar com espera
+                raise e
 
             if is_rate:
                 rotacionou = pool_manager.rotacionar(prov_nome)
                 espera = esperas[tentativa]
                 pool_info = f"pool={pool_manager.tamanho_pool(prov_nome)} chave(s)"
                 rotacao_info = "chave rotacionada" if rotacionou else "pool unitário (sem rotação útil)"
-                print(f"[failover] Rate limit em {prov_nome} ({pool_info}), {rotacao_info}. "
-                      f"Tentativa {tentativa + 1}/5. Aguardando {espera}s...")
+                print(
+                    f"[failover] Rate limit em {prov_nome} ({pool_info}), {rotacao_info}. "
+                    f"Tentativa {tentativa + 1}/5. Aguardando {espera}s..."
+                )
                 time.sleep(espera)
                 continue
 
-            # Erro desconhecido — propaga imediatamente
             raise e
 
     raise RuntimeError(
@@ -152,22 +180,24 @@ def agente_chief_tier0(state):
         return {"plano_do_chief": llm.invoke(prompt).content, "status_passo": "dev"}
     return executar_com_failover(state, "openrouter", acao)
 
+
 def _parsear_componente(texto: str) -> ComponenteMultiLinguagem:
     """Extrai JSON do texto mesmo que o modelo adicione explicações ao redor."""
     import json, re
-    # Tenta parse direto
+
     try:
         return ComponenteMultiLinguagem(**json.loads(texto))
     except Exception:
         pass
-    # Tenta extrair bloco ```json ... ```
+
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", texto, re.DOTALL)
     if match:
         return ComponenteMultiLinguagem(**json.loads(match.group(1)))
-    # Tenta encontrar o primeiro { ... } válido
+
     match = re.search(r"\{.*\}", texto, re.DOTALL)
     if match:
         return ComponenteMultiLinguagem(**json.loads(match.group(0)))
+
     raise ValueError(f"Não foi possível extrair JSON do output do modelo:\n{texto[:300]}")
 
 
@@ -185,6 +215,7 @@ def agente_desenvolvedor_tier2(state):
         f"Siga o plano do Chief:\n{state['plano_do_chief']}\n"
         f"Feedbacks para correção:\n{state.get('historico_erros')}"
     )
+
     from langchain_core.messages import SystemMessage, HumanMessage as HMsg
 
     def acao():
@@ -199,6 +230,7 @@ def agente_desenvolvedor_tier2(state):
 
     return executar_com_failover(state, "openrouter", acao, acao_com_modelo)
 
+
 def agente_quality_gate_tier3(state):
     def acao():
         llm = obter_llm_google("gemini-flash").with_structured_output(QualityReport)
@@ -210,6 +242,7 @@ def agente_quality_gate_tier3(state):
         )
         return {"relatorio_qualidade": llm.invoke(prompt), "status_passo": "validar_score"}
     return executar_com_failover(state, "openrouter", acao)
+
 
 def executar_sast_seguranca(state):
     prod = state["codigo_producao"]
@@ -226,6 +259,7 @@ def executar_sast_seguranca(state):
             }
     return {"status_passo": "test_gen"}
 
+
 def agente_gerador_testes(state):
     def acao():
         llm = obter_llm_google("gemini-flash").with_structured_output(UnitTestComponent)
@@ -235,6 +269,7 @@ def agente_gerador_testes(state):
         )
         return {"codigo_teste": llm.invoke(prompt), "status_passo": "test_run"}
     return executar_com_failover(state, "openrouter", acao)
+
 
 def executor_runtime_pytest(state):
     prod = state["codigo_producao"]
@@ -254,6 +289,7 @@ def executor_runtime_pytest(state):
             }
     return {"status_passo": "sucesso"}
 
+
 def ler_codigo_da_pasta_legada(caminho):
     p = Path(caminho)
     if not p.exists():
@@ -271,7 +307,6 @@ def ler_codigo_da_pasta_legada(caminho):
 
 def roteador(state):
     st = state["status_passo"]
-    # FIX: chief_retry agora volta ao chief para gerar novo plano, não direto ao dev
     if st == "chief_retry":
         return "chief"
     if st == "dev":
@@ -282,22 +317,23 @@ def roteador(state):
         return "executor_pytest"
     if st == "sucesso":
         return END
+
     # validar_score
     media = (state["relatorio_qualidade"].score_clean_code + state["relatorio_qualidade"].score_arquitetura) / 2
     return "desenvolvedor" if media < 80 else "sast"
 
+
 w = StateGraph(EstadoEngenharia)
-w.add_node("chief", agente_chief_tier0)
-w.add_node("desenvolvedor", agente_desenvolvedor_tier2)
-w.add_node("quality_gate", agente_quality_gate_tier3)
-w.add_node("sast", executar_sast_seguranca)
+w.add_node("chief",          agente_chief_tier0)
+w.add_node("desenvolvedor",  agente_desenvolvedor_tier2)
+w.add_node("quality_gate",   agente_quality_gate_tier3)
+w.add_node("sast",           executar_sast_seguranca)
 w.add_node("gerador_testes", agente_gerador_testes)
 w.add_node("executor_pytest", executor_runtime_pytest)
 
 w.set_entry_point("chief")
 w.add_edge("chief", "desenvolvedor")
 w.add_edge("desenvolvedor", "quality_gate")
-
 w.add_conditional_edges("quality_gate", roteador)
 w.add_conditional_edges("sast", roteador, {"chief": "chief", "desenvolvedor": "desenvolvedor", "gerador_testes": "gerador_testes", END: END})
 w.add_conditional_edges("executor_pytest", roteador, {"chief": "chief", END: END})

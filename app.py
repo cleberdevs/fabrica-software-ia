@@ -5,6 +5,19 @@ import os
 # que LANGCHAIN_API_KEY e LANGCHAIN_TRACING_V2 estejam disponíveis
 dotenv.load_dotenv()
 
+# ── LangSmith: confirma configuração logo após load_dotenv ──────────────────
+# No HF Spaces os Secrets já estão em os.environ; o dotenv só ajuda localmente.
+# Garantimos aqui antes de importar grafo.py (que importa langgraph).
+if os.environ.get("LANGCHAIN_API_KEY"):
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGCHAIN_PROJECT",    "fabrica-key-rotation")
+    os.environ.setdefault("LANGCHAIN_ENDPOINT",   "https://api.smith.langchain.com")
+    print(f"[app] LangSmith configurado — projeto: {os.environ['LANGCHAIN_PROJECT']}")
+else:
+    os.environ["LANGCHAIN_TRACING_V2"] = "false"
+    print("[app] ⚠️  LANGCHAIN_API_KEY ausente — tracing desativado.")
+# ────────────────────────────────────────────────────────────────────────────
+
 import gradio as gr
 import pandas as pd
 import base64
@@ -17,14 +30,16 @@ from exporter import exportar_para_estrutura_clean_arch
 DIR_PROJ = Path("projetos_fabrica")
 DIR_PROJ.mkdir(exist_ok=True)
 
+
 def listar_sistemas():
     pastas = [p.name for p in DIR_PROJ.iterdir() if p.is_dir()]
     return pastas if pastas else ["Nenhum projeto encontrado"]
 
+
 def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_quebrado, erro_log, nova_funcionalidade, arquivos, linguagem, framework):
     if not requisito and modo == "Construir Novo Sistema do Zero":
         return "❌ Erro: Descreva os requisitos do novo software."
-        
+
     ctx_arq = ""
     if arquivos:
         for f in arquivos:
@@ -47,33 +62,36 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
                 ctx_arq += f"\n### Visão ({f.name}):\n{llm_visao.invoke([HumanMessage(content=[{'type':'text','text':'Traduz o diagrama em especificacoes.'},{'type':'image_url','image_url':{'url':f'data:image/jpeg;base64,{b64}'}}])]).content}\n"
 
     codigo_legado, hist_erros, e_correcao = "", [], False
+
     if modo == "Construir Novo Sistema do Zero":
         projeto_final = DIR_PROJ / nome_projeto
         req_final = requisito
     elif modo == "Corrigir Erro de Compilação (Debug Mode)":
-        if projeto_existente == "Nenhum projeto encontrado": return "❌ Selecione um projeto válido."
+        if projeto_existente == "Nenhum projeto encontrado":
+            return "❌ Selecione um projeto válido."
         projeto_final = DIR_PROJ / projeto_existente
         req_final = f"CORREÇÃO DE BUG. Código:\n{codigo_quebrado}"
         hist_erros = [f"Log:\n{erro_log}"]
         e_correcao = True
     else:
-        if projeto_existente == "Nenhum projeto encontrado": return "❌ Selecione um projeto válido."
+        if projeto_existente == "Nenhum projeto encontrado":
+            return "❌ Selecione um projeto válido."
         projeto_final = DIR_PROJ / projeto_existente
         req_final = nova_funcionalidade
         codigo_legado = ler_codigo_da_pasta_legada(str(projeto_final))
         e_correcao = True
 
     inputs = {
-        "requisito": req_final, 
-        "codigo_legado": codigo_legado, 
-        "contexto_arquivos": ctx_arq, 
-        "historico_erros": hist_erros, 
-        "status_passo": "dev", 
-        "modelo_selecionado": "qwen", 
-        "linguagem_selecionada": linguagem, 
+        "requisito":            req_final,
+        "codigo_legado":        codigo_legado,
+        "contexto_arquivos":    ctx_arq,
+        "historico_erros":      hist_erros,
+        "status_passo":         "dev",
+        "modelo_selecionado":   "qwen",
+        "linguagem_selecionada": linguagem,
         "framework_selecionado": framework
     }
-    
+
     try:
         state = app.invoke(inputs)
         if state.get("status_passo") == "sucesso" or "codigo_producao" in state:
@@ -86,7 +104,7 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
             )
             prod = state["codigo_producao"]
 
-            # ── README sem diagramas (o modelo não gera mermaid) ──────────────
+            # ── README sem diagramas (gerados separadamente) ──────────────────
             prompt_readme = (
                 f"Gere o README.md completo com instruções Docker para o sistema {linguagem}/{framework}.\n"
                 f"Domínio: {prod.camada_dominio}\nAplicação: {prod.camada_aplicacao}\nWeb: {prod.camada_infra_web}\n\n"
@@ -135,6 +153,7 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
                 "Tipos de relação: inheritance, composition, aggregation, association\n"
                 "NUNCA use Optional~tipo~, List~tipo~ ou qualquer genericidade com ~"
             )
+
             import json, re
 
             def gerar_mermaid_classes(codigo_json: str) -> str:
@@ -152,24 +171,24 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
                 lines = ["classDiagram"]
                 for cls in data.get("classes", []):
                     name = re.sub(r"[^A-Za-z0-9_]", "_", cls["name"])
-                    lines.append(f"    class {name} {{")
+                    lines.append(f"  class {name} {{")
                     for attr in cls.get("attributes", []):
                         safe = re.sub(r"[~<>]", "", attr).strip()
-                        lines.append(f"        +{safe}")
+                        lines.append(f"    +{safe}")
                     for meth in cls.get("methods", []):
                         safe = re.sub(r"[~<>]", "", meth).strip()
                         if not safe.endswith(")"):
                             safe += "()"
-                        lines.append(f"        +{safe}")
-                    lines.append("    }")
+                        lines.append(f"    +{safe}")
+                    lines.append("  }")
                 for rel in data.get("relations", []):
                     arrow = rel_map.get(rel.get("type", "association"), "-->")
                     frm = re.sub(r"[^A-Za-z0-9_]", "_", rel["from"])
                     to  = re.sub(r"[^A-Za-z0-9_]", "_", rel["to"])
-                    lines.append(f"    {frm} {arrow} {to}")
+                    lines.append(f"  {frm} {arrow} {to}")
                 return "\n".join(lines)
 
-            classes_json = llm_utils.invoke(prompt_classes_json).content
+            classes_json   = llm_utils.invoke(prompt_classes_json).content
             mermaid_classes = gerar_mermaid_classes(classes_json)
 
             # ── Diagrama de deploy Docker via JSON estruturado ────────────────
@@ -190,40 +209,40 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
                 except Exception:
                     return ""
                 shape_map = {
-                    "rect":     ("[", "]"),
+                    "rect":    ("[",  "]"),
                     "cylinder": ("[(", ")]"),
-                    "diamond":  ("{", "}"),
-                    "rounded":  ("(", ")"),
+                    "diamond":  ("{",  "}"),
+                    "rounded":  ("(",  ")"),
                 }
                 lines = ["flowchart TD"]
                 for sg in data.get("subgraphs", []):
                     sg_id    = re.sub(r"[^A-Za-z0-9_]", "_", sg["id"])
                     sg_label = sg.get("label", sg_id)
-                    lines.append(f"    subgraph {sg_id}[{sg_label}]")
+                    lines.append(f"  subgraph {sg_id}[{sg_label}]")
                     for nid in sg.get("nodes", []):
                         node = next((n for n in data["nodes"] if n["id"] == nid), None)
                         if node:
                             nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
                             lbl = node.get("label", nid_safe)
                             o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
-                            lines.append(f"        {nid_safe}{o}{lbl}{c}")
-                    lines.append("    end")
+                            lines.append(f"    {nid_safe}{o}{lbl}{c}")
+                    lines.append("  end")
                 subgraph_nodes = {n for sg in data.get("subgraphs", []) for n in sg.get("nodes", [])}
                 for node in data.get("nodes", []):
                     if node["id"] not in subgraph_nodes:
                         nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
                         lbl = node.get("label", nid_safe)
                         o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
-                        lines.append(f"    {nid_safe}{o}{lbl}{c}")
+                        lines.append(f"  {nid_safe}{o}{lbl}{c}")
                 for edge in data.get("edges", []):
-                    frm = re.sub(r"[^A-Za-z0-9_]", "_", edge["from"])
-                    to  = re.sub(r"[^A-Za-z0-9_]", "_", edge["to"])
-                    lbl = edge.get("label", "")
+                    frm   = re.sub(r"[^A-Za-z0-9_]", "_", edge["from"])
+                    to    = re.sub(r"[^A-Za-z0-9_]", "_", edge["to"])
+                    lbl   = edge.get("label", "")
                     arrow = f"-->|{lbl}|" if lbl else "-->"
-                    lines.append(f"    {frm} {arrow} {to}")
+                    lines.append(f"  {frm} {arrow} {to}")
                 return "\n".join(lines)
 
-            deploy_json  = llm_utils.invoke(prompt_deploy_json).content
+            deploy_json    = llm_utils.invoke(prompt_deploy_json).content
             mermaid_deploy = gerar_mermaid_deploy(deploy_json)
 
             # ── Monta README final com diagramas válidos ──────────────────────
@@ -238,67 +257,105 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
             ) if mermaid_deploy else ""
 
             docs = readme_sem_diagramas + "\n\n" + diagrama_classes + "\n" + diagrama_deploy
-            swag = llm_utils.invoke(f"Retorne APENAS o JSON OpenAPI v3 cru para as rotas sem markdown:\n{prod.camada_infra_web}").content
-            
-            sync = exportar_para_estrutura_clean_arch(prod, state["codigo_teste"], str(projeto_final), docs, swag, linguagem, framework, e_correcao=e_correcao)
+
+            swag = llm_utils.invoke(
+                f"Retorne APENAS o JSON OpenAPI v3 cru para as rotas sem markdown:\n{prod.camada_infra_web}"
+            ).content
+
+            sync = exportar_para_estrutura_clean_arch(
+                prod, state["codigo_teste"], str(projeto_final),
+                docs, swag, linguagem, framework, e_correcao=e_correcao
+            )
+
             res_git = "☁️ Repositório criado/atualizado com sucesso no GitHub!" if sync else "💾 Salvo localmente."
-            return f"🎉 **SUCESSO EXCEPCIONAL!**\n\n**Pasta:** `{projeto_final}`\n**Status:** {res_git}\n\n## 📄 Manual Técnico Gerado (README.md):\n\n{docs}"
+            return (
+                f"🎉 **SUCESSO EXCEPCIONAL!**\n\n"
+                f"**Pasta:** `{projeto_final}`\n**Status:** {res_git}\n\n"
+                f"## 📄 Manual Técnico Gerado (README.md):\n\n{docs}"
+            )
         else:
             return "❌ Falha nos guardrails de qualidade ou segurança da esteira."
+
     except Exception as e:
         return f"🚨 Erro Crítico na Esteira: {str(e)}"
+
 
 with gr.Blocks() as demo:
     gr.Markdown("# 🏭 Fábrica de Software Autônoma Enterprise Pro")
     gr.Markdown("Matriz Híbrida: **Gemini 2.5 Pro** ➔ **Qwen 3 Coder Free** ➔ **Gemini 2.5 Flash**")
-    
+
     with gr.Row():
         with gr.Column(scale=1):
             gr.Markdown("### 🧰 Configuração Técnica")
-            linguagem = gr.Dropdown(label="Linguagem-Alvo", choices=["Python", "TypeScript", "Java", "C#", "Rust"], value="Python")
-            framework = gr.Dropdown(label="Framework Web", choices=["FastAPI", "Express", "Spring Boot", ".NET Core", "Axum"], value="FastAPI")
-            
+            linguagem = gr.Dropdown(
+                label="Linguagem-Alvo",
+                choices=["Python", "TypeScript", "Java", "C#", "Rust"],
+                value="Python"
+            )
+            framework = gr.Dropdown(
+                label="Framework Web",
+                choices=["FastAPI", "Express", "Spring Boot", ".NET Core", "Axum"],
+                value="FastAPI"
+            )
+
             def atualizar_frameworks(lang):
-                fw_map = {"Python": ["FastAPI"], "TypeScript": ["Express"], "Java": ["Spring Boot"], "C#": [".NET Core"], "Rust": ["Axum"]}
+                fw_map = {
+                    "Python":     ["FastAPI"],
+                    "TypeScript": ["Express"],
+                    "Java":       ["Spring Boot"],
+                    "C#":         [".NET Core"],
+                    "Rust":       ["Axum"]
+                }
                 return gr.update(choices=fw_map.get(lang, ["FastAPI"]), value=fw_map.get(lang, ["FastAPI"])[0])
+
             linguagem.change(atualizar_frameworks, inputs=[linguagem], outputs=[framework])
-            
-            modo = gr.Radio(label="Operação de Engenharia", choices=["Construir Novo Sistema do Zero", "Evoluir/Refatorar Sistema Existente", "Corrigir Erro de Compilação (Debug Mode)"], value="Construir Novo Sistema do Zero")
+
+            modo = gr.Radio(
+                label="Operação de Engenharia",
+                choices=["Construir Novo Sistema do Zero", "Evoluir/Refatorar Sistema Existente", "Corrigir Erro de Compilação (Debug Mode)"],
+                value="Construir Novo Sistema do Zero"
+            )
             arquivos = gr.File(label="📎 Anexos (Imagens / Planilhas / OpenAPI)", file_count="multiple")
-            
+
         with gr.Column(scale=2):
             with gr.Group() as p_novo:
                 gr.Markdown("#### Novo Projeto")
-                requisito = gr.Textbox(label="Requisitos do Software / Prompt", placeholder="Ex: API de e-commerce com carrinho...", lines=4)
+                requisito    = gr.Textbox(label="Requisitos do Software / Prompt", placeholder="Ex: API de e-commerce com carrinho...", lines=4)
                 nome_projeto = gr.Textbox(label="Nome da Pasta do Projeto", value="api_enterprise_service")
-                
+
             with gr.Group(visible=False) as p_existente:
                 gr.Markdown("#### Seleção de Projeto Salvo")
-                opcoes_sistemas = listar_sistemas()
-                # 🔄 CORREÇÃO DO VALUE: Passando explicitamente a string do primeiro item em vez da lista bruta
-                projeto_existente = gr.Dropdown(label="Escolha o Projeto Alvo", choices=opcoes_sistemas, value=opcoes_sistemas[0])
-                
-                with gr.Tab("🚀 Injetar Nova Funcionalidade") as tab_evo:
-                    nova_funcionalidade = gr.Textbox(label="Instruções de Evolução Incremental", placeholder="Ex: Adicione uma rota GET /historico...", lines=3)
-                with gr.Tab("🚨 Debug Mode (Fix Bugs)") as tab_debug:
+                opcoes_sistemas  = listar_sistemas()
+                projeto_existente = gr.Dropdown(
+                    label="Escolha o Projeto Alvo",
+                    choices=opcoes_sistemas,
+                    value=opcoes_sistemas[0]
+                )
+                with gr.Tab("🚀 Injetar Nova Funcionalidade"):
+                    nova_funcionalidade = gr.Textbox(
+                        label="Instruções de Evolução Incremental",
+                        placeholder="Ex: Adicione uma rota GET /historico...",
+                        lines=3
+                    )
+                with gr.Tab("🚨 Debug Mode (Fix Bugs)"):
                     codigo_quebrado = gr.Textbox(label="Trecho do Código com Defeito", lines=3)
-                    erro_log = gr.Textbox(label="Stack Trace / Erro do Terminal", lines=3)
+                    erro_log        = gr.Textbox(label="Stack Trace / Erro do Terminal", lines=3)
 
             def alternar_modos(m):
                 if m == "Construir Novo Sistema do Zero":
                     return gr.update(visible=True), gr.update(visible=False)
                 return gr.update(visible=False), gr.update(visible=True)
+
             modo.change(alternar_modos, inputs=[modo], outputs=[p_novo, p_existente])
-            
-            btn = gr.Button("⚡ Iniciar Linha de Produção", variant="primary")
-            output_text = gr.Markdown(value="💡 Aguardando comandos para iniciar a esteira corporativa...")
+
+    btn = gr.Button("⚡ Iniciar Linha de Produção", variant="primary")
+    output_text = gr.Markdown(value="💡 Aguardando comandos para iniciar a esteira corporativa...")
 
     btn.click(
-        processar_execucao, 
-        inputs=[modo, requisito, nome_projeto, projeto_existente, codigo_quebrado, erro_log, nova_funcionalidade, arquivos, linguagem, framework], 
+        processar_execucao,
+        inputs=[modo, requisito, nome_projeto, projeto_existente, codigo_quebrado, erro_log, nova_funcionalidade, arquivos, linguagem, framework],
         outputs=[output_text]
     )
 
 if __name__ == "__main__":
-    # 🔄 CORREÇÃO DO LAUNCH: Removido o argumento depreciado 'show_api'
     demo.launch(server_name="0.0.0.0", theme=gr.themes.Soft())
