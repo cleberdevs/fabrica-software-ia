@@ -1,15 +1,29 @@
-langgraph>=0.2.0
+# ── Interface Web ──────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9   # necessário para Form() e File() no FastAPI
+
+# ── LangGraph / LangChain ──────────────────────────────────────────────────
+langgraph>=0.1.0
 langchain>=0.2.0
+langchain-core>=0.2.0
 langchain-openai>=0.1.0
-langchain-google-genai>=0.1.0
-langchain-anthropic>=0.1.0
-langsmith>=0.1.0
-pydantic>=2.6.0
-pydantic-settings>=2.2.0
-bandit>=1.7.0
-pytest>=8.0.0
-python-dotenv>=1.0.0
+
+# ── Modelos e APIs ─────────────────────────────────────────────────────────
+openai>=1.30.0            # cliente compatível com OpenRouter
+
+# ── Dados ─────────────────────────────────────────────────────────────────
 pandas>=2.0.0
-openpyxl>=3.1.0
-tabulate>=0.9.0
-gradio>=5.0.0
+openpyxl>=3.1.0           # leitura de .xlsx
+tabulate>=0.9.0           # df.to_markdown()
+
+# ── Qualidade de código ────────────────────────────────────────────────────
+bandit>=1.7.0             # SAST para Python
+pytest>=8.0.0             # sandbox de testes
+
+# ── GitHub ─────────────────────────────────────────────────────────────────
+PyGithub>=2.3.0
+
+# ── Utilitários ────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+pydantic>=2.7.0

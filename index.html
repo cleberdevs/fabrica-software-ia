@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fábrica de Software IA Enterprise</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg:       #0d0f14;
+    --surface:  #13161e;
+    --surface2: #191d28;
+    --border:   #1f2435;
+    --bhi:      #2e3555;
+    --text:     #c9d1e8;
+    --muted:    #5a6482;
+    --accent:   #4f8cff;
+    --accent2:  #a78bfa;
+    --accent3:  #34d399;
+    --danger:   #f87171;
+    --warn:     #fbbf24;
+    --mono:     'IBM Plex Mono', monospace;
+    --sans:     'IBM Plex Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--sans); font-size: 15px; line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── Header ── */
+  header {
+    position: sticky; top: 0; z-index: 200;
+    background: rgba(13,15,20,.94); backdrop-filter: blur(14px);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 1.5rem; height: 52px;
+  }
+  .logo { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--accent); display: flex; align-items: center; gap: .4rem; }
+  .logo em { color: var(--muted); font-style: normal; }
+  .hstatus { display: flex; align-items: center; gap: .5rem; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent3); animation: blink 2s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* ── Layout ── */
+  .workspace {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 0;
+    height: calc(100vh - 52px);
+  }
+
+  /* ── Sidebar / Form ── */
+  .sidebar {
+    border-right: 1px solid var(--border);
+    overflow-y: auto; overflow-x: hidden;
+    padding: 1.25rem;
+    display: flex; flex-direction: column; gap: 1rem;
+  }
+  .sidebar::-webkit-scrollbar { width: 4px; }
+  .sidebar::-webkit-scrollbar-track { background: transparent; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden;
+  }
+  .card-header {
+    padding: .75rem 1rem; border-bottom: 1px solid var(--border);
+    font-family: var(--mono); font-size: 11px; font-weight: 600;
+    color: var(--muted); letter-spacing: .08em; text-transform: uppercase;
+    display: flex; align-items: center; gap: .5rem;
+  }
+  .card-body { padding: 1rem; display: flex; flex-direction: column; gap: .75rem; }
+
+  /* ── Form elements ── */
+  label { font-size: 12px; color: var(--muted); display: block; margin-bottom: .3rem; font-weight: 500; }
+
+  select, textarea, input[type="text"] {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-family: var(--sans);
+    font-size: 13px; padding: .55rem .75rem;
+    transition: border-color .15s;
+    outline: none; resize: vertical;
+  }
+  select:focus, textarea:focus, input[type="text"]:focus { border-color: var(--accent); }
+  select option { background: var(--surface); }
+  textarea { min-height: 80px; }
+
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+
+  /* ── Mode tabs ── */
+  .mode-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .mode-tab {
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: .5rem .4rem; cursor: pointer;
+    font-size: 11px; font-family: var(--mono); color: var(--muted);
+    text-align: center; transition: all .15s; line-height: 1.3;
+  }
+  .mode-tab:hover { border-color: var(--bhi); color: var(--text); }
+  .mode-tab.active { border-color: var(--accent); color: var(--accent); background: rgba(79,140,255,.08); }
+  .mode-tab .micon { font-size: 1.1rem; display: block; margin-bottom: 3px; }
+
+  /* ── Mode panels ── */
+  .mode-panel { display: none; flex-direction: column; gap: .75rem; }
+  .mode-panel.active { display: flex; }
+
+  /* ── File drop ── */
+  .file-drop {
+    border: 1.5px dashed var(--border); border-radius: 8px;
+    padding: 1rem; text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s; position: relative;
+  }
+  .file-drop:hover, .file-drop.dragover { border-color: var(--accent); background: rgba(79,140,255,.04); }
+  .file-drop input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .file-drop .fd-icon { font-size: 1.4rem; margin-bottom: .3rem; }
+  .file-drop p { font-size: 12px; color: var(--muted); }
+  .file-list { display: flex; flex-wrap: wrap; gap: 4px; margin-top: .5rem; }
+  .file-chip {
+    background: rgba(79,140,255,.1); border: 1px solid rgba(79,140,255,.2);
+    color: var(--accent); font-family: var(--mono); font-size: 10px;
+    padding: 2px 8px; border-radius: 100px;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .file-chip button { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; padding: 0; line-height: 1; }
+
+  /* ── Submit ── */
+  .btn-run {
+    width: 100%; padding: .75rem; border-radius: 8px;
+    background: var(--accent); border: none; color: #fff;
+    font-family: var(--mono); font-size: 13px; font-weight: 600;
+    cursor: pointer; transition: background .15s, transform .1s;
+    display: flex; align-items: center; justify-content: center; gap: .5rem;
+  }
+  .btn-run:hover:not(:disabled) { background: #3a7ae8; }
+  .btn-run:active:not(:disabled) { transform: scale(.98); }
+  .btn-run:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+  /* ── Output panel ── */
+  .output-panel {
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .output-toolbar {
+    padding: .75rem 1.25rem; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+  }
+  .output-toolbar h2 { font-family: var(--mono); font-size: 13px; color: var(--muted); font-weight: 500; }
+  .tool-btns { display: flex; gap: .5rem; }
+  .tbtn {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: .35rem .75rem;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+    cursor: pointer; transition: all .15s;
+  }
+  .tbtn:hover { border-color: var(--bhi); color: var(--text); }
+  .tbtn.active { border-color: var(--accent); color: var(--accent); }
+
+  .output-content {
+    flex: 1; overflow-y: auto; padding: 1.5rem;
+  }
+  .output-content::-webkit-scrollbar { width: 4px; }
+  .output-content::-webkit-scrollbar-track { background: transparent; }
+  .output-content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  /* ── Log view ── */
+  .log-view {
+    font-family: var(--mono); font-size: 12px;
+    display: flex; flex-direction: column; gap: .4rem;
+  }
+  .log-entry { display: flex; gap: .75rem; align-items: flex-start; }
+  .log-time { color: var(--muted); flex-shrink: 0; }
+  .log-msg { color: var(--text); word-break: break-word; }
+  .log-msg.err { color: var(--danger); }
+  .log-msg.ok { color: var(--accent3); }
+
+  /* ── Markdown view ── */
+  .md-view { display: none; }
+  .md-view.active { display: block; }
+  .md-view h1 { font-size: 1.5rem; color: #fff; margin: 1.5rem 0 .75rem; font-family: var(--mono); }
+  .md-view h2 { font-size: 1.1rem; color: #fff; margin: 1.25rem 0 .5rem; font-family: var(--mono); border-bottom: 1px solid var(--border); padding-bottom: .4rem; }
+  .md-view h3 { font-size: .95rem; color: var(--text); margin: 1rem 0 .4rem; }
+  .md-view p { margin-bottom: .75rem; color: var(--muted); }
+  .md-view code { font-family: var(--mono); font-size: .8rem; background: rgba(255,255,255,.06); padding: .1rem .35rem; border-radius: 3px; color: var(--accent2); }
+  .md-view pre { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; margin: .75rem 0; }
+  .md-view pre code { background: none; padding: 0; color: var(--text); }
+  .md-view table { width: 100%; border-collapse: collapse; margin: .75rem 0; font-size: .85rem; }
+  .md-view th { text-align: left; padding: .5rem .75rem; border-bottom: 2px solid var(--border); color: var(--muted); font-family: var(--mono); font-size: 11px; }
+  .md-view td { padding: .5rem .75rem; border-bottom: 1px solid var(--border); color: var(--muted); }
+  .md-view ul, .md-view ol { padding-left: 1.5rem; margin-bottom: .75rem; color: var(--muted); }
+  .md-view li { margin-bottom: .25rem; }
+  .md-view a { color: var(--accent); }
+  .md-view blockquote { border-left: 3px solid var(--accent); padding-left: 1rem; color: var(--muted); margin: .75rem 0; }
+
+  /* ── Empty state ── */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 100%; gap: 1rem; color: var(--muted);
+    text-align: center;
+  }
+  .empty-icon { font-size: 3rem; opacity: .3; }
+  .empty-state h3 { font-family: var(--mono); font-size: .9rem; color: var(--muted); font-weight: 400; }
+  .empty-state p { font-size: .8rem; max-width: 260px; }
+
+  /* ── Progress bar ── */
+  .progress-wrap { display: none; padding: 0 1.25rem 1rem; flex-shrink: 0; }
+  .progress-wrap.visible { display: block; }
+  .progress-bar { height: 2px; background: var(--border); border-radius: 1px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); border-radius: 1px; transition: width .3s; animation: progress-anim 1.5s ease-in-out infinite; }
+  @keyframes progress-anim { 0%{width:0} 50%{width:70%} 100%{width:95%} }
+
+  /* ── Success banner ── */
+  .success-banner {
+    background: rgba(52,211,153,.08); border: 1px solid rgba(52,211,153,.2);
+    border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem;
+    display: flex; gap: .75rem; align-items: flex-start;
+  }
+  .success-banner .sb-icon { font-size: 1.2rem; flex-shrink: 0; }
+  .success-banner h4 { font-family: var(--mono); font-size: .85rem; color: var(--accent3); margin-bottom: .25rem; }
+  .success-banner p { font-size: .8rem; color: var(--muted); }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .workspace { grid-template-columns: 1fr; grid-template-rows: auto 1fr; height: auto; }
+    .sidebar { height: auto; max-height: 70vh; }
+    .output-panel { min-height: 50vh; }
+    .row2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🏭 <em>fabrica-software-ia</em></div>
+  <div class="hstatus">
+    <div class="dot"></div>
+    <span id="statusTxt">pronto</span>
+  </div>
+</header>
+
+<div class="workspace">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+
+    <!-- Stack -->
+    <div class="card">
+      <div class="card-header">🧰 Stack</div>
+      <div class="card-body">
+        <div class="row2">
+          <div>
+            <label>Linguagem</label>
+            <select id="linguagem" onchange="syncFramework()">
+              <option value="Python">Python</option>
+              <option value="TypeScript">TypeScript</option>
+              <option value="Java">Java</option>
+              <option value="C#">C#</option>
+              <option value="Rust">Rust</option>
+            </select>
+          </div>
+          <div>
+            <label>Framework</label>
+            <select id="framework">
+              <option value="FastAPI">FastAPI</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modo -->
+    <div class="card">
+      <div class="card-header">⚙️ Operação</div>
+      <div class="card-body">
+        <div class="mode-tabs">
+          <div class="mode-tab active" data-mode="novo" onclick="setModo('novo', this)">
+            <span class="micon">🏗️</span>Novo
+          </div>
+          <div class="mode-tab" data-mode="evoluir" onclick="setModo('evoluir', this)">
+            <span class="micon">⚙️</span>Evoluir
+          </div>
+          <div class="mode-tab" data-mode="debug" onclick="setModo('debug', this)">
+            <span class="micon">🚨</span>Debug
+          </div>
+        </div>
+
+        <!-- NOVO -->
+        <div class="mode-panel active" id="panel-novo">
+          <div>
+            <label>Requisitos do software</label>
+            <textarea id="requisito" placeholder="Ex: API de e-commerce com carrinho, checkout e relatórios de vendas. Banco PostgreSQL." rows="5"></textarea>
+          </div>
+          <div>
+            <label>Nome da pasta do projeto</label>
+            <input type="text" id="nome_projeto" value="api_enterprise_service">
+          </div>
+        </div>
+
+        <!-- EVOLUIR -->
+        <div class="mode-panel" id="panel-evoluir">
+          <div>
+            <label>Projeto existente</label>
+            <select id="projeto_existente_evo"><option value="">Carregando...</option></select>
+          </div>
+          <div>
+            <label>Nova funcionalidade</label>
+            <textarea id="nova_funcionalidade" placeholder="Ex: Adicione uma rota GET /historico que retorna os últimos 50 pedidos paginados." rows="4"></textarea>
+          </div>
+        </div>
+
+        <!-- DEBUG -->
+        <div class="mode-panel" id="panel-debug">
+          <div>
+            <label>Projeto com defeito</label>
+            <select id="projeto_existente_debug"><option value="">Carregando...</option></select>
+          </div>
+          <div>
+            <label>Trecho do código com defeito</label>
+            <textarea id="codigo_quebrado" placeholder="Cole aqui o código quebrado..." rows="4"></textarea>
+          </div>
+          <div>
+            <label>Stack trace / log de erro</label>
+            <textarea id="erro_log" placeholder="Cole aqui o erro do terminal..." rows="3"></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Anexos -->
+    <div class="card">
+      <div class="card-header">📎 Anexos <span style="color:var(--border-hi);font-size:10px;margin-left:auto">CSV · XLSX · JSON · Imagens</span></div>
+      <div class="card-body">
+        <div class="file-drop" id="fileDrop">
+          <input type="file" id="fileInput" multiple accept=".csv,.xlsx,.json,.yaml,.yml,.png,.jpg,.jpeg,.webp" onchange="handleFiles(this.files)">
+          <div class="fd-icon">📁</div>
+          <p>Arraste arquivos ou clique para selecionar</p>
+        </div>
+        <div class="file-list" id="fileList"></div>
+      </div>
+    </div>
+
+    <!-- Run -->
+    <button class="btn-run" id="btnRun" onclick="executar()">
+      <span>⚡</span> Iniciar Linha de Produção
+    </button>
+
+  </aside>
+
+  <!-- ── OUTPUT ── -->
+  <main class="output-panel">
+    <div class="output-toolbar">
+      <h2>Saída da Esteira</h2>
+      <div class="tool-btns">
+        <button class="tbtn active" id="btnLog" onclick="setView('log')">Log</button>
+        <button class="tbtn" id="btnDocs" onclick="setView('docs')">README</button>
+      </div>
+    </div>
+
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar"><div class="progress-fill"></div></div>
+    </div>
+
+    <div class="output-content" id="outputContent">
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">🏭</div>
+        <h3>Esteira parada</h3>
+        <p>Configure os parâmetros no painel à esquerda e clique em "Iniciar Linha de Produção".</p>
+      </div>
+
+      <!-- Log -->
+      <div class="log-view" id="logView" style="display:none"></div>
+
+      <!-- Docs -->
+      <div class="md-view" id="docsView"></div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+// ── Estado ─────────────────────────────────────────────────────────────────
+let modoAtual = 'novo';
+let arquivosSelecionados = [];
+let executando = false;
+
+const FW_MAP = {
+  Python: ['FastAPI'],
+  TypeScript: ['Express'],
+  Java: ['Spring Boot'],
+  'C#': ['.NET Core'],
+  Rust: ['Axum'],
+};
+
+// ── Init ───────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  carregarProjetos();
+  setupDrop();
+});
+
+async function carregarProjetos() {
+  try {
+    const r = await fetch('/projetos');
+    const data = await r.json();
+    const projetos = data.projetos || [];
+
+    ['projeto_existente_evo', 'projeto_existente_debug'].forEach(id => {
+      const sel = document.getElementById(id);
+      sel.innerHTML = projetos.length
+        ? projetos.map(p => `<option value="${p}">${p}</option>`).join('')
+        : '<option value="">Nenhum projeto encontrado</option>';
+    });
+  } catch (e) {
+    console.warn('Erro ao carregar projetos:', e);
+  }
+}
+
+// ── Stack ──────────────────────────────────────────────────────────────────
+function syncFramework() {
+  const lang = document.getElementById('linguagem').value;
+  const fw = document.getElementById('framework');
+  fw.innerHTML = (FW_MAP[lang] || ['FastAPI']).map(f => `<option value="${f}">${f}</option>`).join('');
+}
+
+// ── Modo ───────────────────────────────────────────────────────────────────
+function setModo(modo, el) {
+  modoAtual = modo;
+  document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.mode-panel').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById(`panel-${modo}`).classList.add('active');
+}
+
+// ── Arquivos ───────────────────────────────────────────────────────────────
+function handleFiles(files) {
+  Array.from(files).forEach(f => {
+    if (!arquivosSelecionados.find(x => x.name === f.name)) {
+      arquivosSelecionados.push(f);
+    }
+  });
+  renderFileList();
+}
+
+function renderFileList() {
+  const list = document.getElementById('fileList');
+  list.innerHTML = arquivosSelecionados.map((f, i) =>
+    `<div class="file-chip">
+      ${f.name}
+      <button onclick="removeFile(${i})" title="Remover">×</button>
+    </div>`
+  ).join('');
+}
+
+function removeFile(i) {
+  arquivosSelecionados.splice(i, 1);
+  renderFileList();
+}
+
+function setupDrop() {
+  const drop = document.getElementById('fileDrop');
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('dragover');
+    handleFiles(e.dataTransfer.files);
+  });
+}
+
+// ── View ───────────────────────────────────────────────────────────────────
+function setView(v) {
+  document.getElementById('btnLog').classList.toggle('active', v === 'log');
+  document.getElementById('btnDocs').classList.toggle('active', v === 'docs');
+  document.getElementById('logView').style.display = v === 'log' ? 'flex' : 'none';
+  const dv = document.getElementById('docsView');
+  dv.classList.toggle('active', v === 'docs');
+}
+
+function addLog(msg, tipo = 'info') {
+  const view = document.getElementById('logView');
+  const now = new Date().toLocaleTimeString('pt-BR', { hour12: false });
+  const cls = tipo === 'erro' ? 'err' : tipo === 'ok' ? 'ok' : '';
+  const el = document.createElement('div');
+  el.className = 'log-entry';
+  el.innerHTML = `<span class="log-time">${now}</span><span class="log-msg ${cls}">${msg}</span>`;
+  view.appendChild(el);
+  view.scrollTop = view.scrollHeight;
+}
+
+// ── Executar ───────────────────────────────────────────────────────────────
+async function executar() {
+  if (executando) return;
+  executando = true;
+
+  const btn = document.getElementById('btnRun');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="dot" style="width:8px;height:8px;display:inline-block"></span> Processando...';
+
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('logView').innerHTML = '';
+  document.getElementById('logView').style.display = 'flex';
+  document.getElementById('docsView').innerHTML = '';
+  document.getElementById('docsView').classList.remove('active');
+  document.getElementById('btnLog').classList.add('active');
+  document.getElementById('btnDocs').classList.remove('active');
+  document.getElementById('progressWrap').classList.add('visible');
+  document.getElementById('statusTxt').textContent = 'executando';
+
+  // Monta FormData
+  const fd = new FormData();
+  fd.append('modo', modoAtual);
+  fd.append('linguagem', document.getElementById('linguagem').value);
+  fd.append('framework', document.getElementById('framework').value);
+
+  if (modoAtual === 'novo') {
+    fd.append('requisito', document.getElementById('requisito').value);
+    fd.append('nome_projeto', document.getElementById('nome_projeto').value);
+  } else if (modoAtual === 'evoluir') {
+    fd.append('projeto_existente', document.getElementById('projeto_existente_evo').value);
+    fd.append('nova_funcionalidade', document.getElementById('nova_funcionalidade').value);
+  } else {
+    fd.append('projeto_existente', document.getElementById('projeto_existente_debug').value);
+    fd.append('codigo_quebrado', document.getElementById('codigo_quebrado').value);
+    fd.append('erro_log', document.getElementById('erro_log').value);
+  }
+
+  arquivosSelecionados.forEach(f => fd.append('arquivos', f));
+
+  try {
+    const resp = await fetch('/gerar', { method: 'POST', body: fd });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const { tipo, dados } = JSON.parse(line.slice(6));
+
+          if (tipo === 'log') {
+            addLog(dados);
+          } else if (tipo === 'erro') {
+            addLog(dados, 'erro');
+            terminar();
+          } else if (tipo === 'sucesso') {
+            const payload = JSON.parse(dados);
+            addLog(`✅ Concluído · ${payload.git}`, 'ok');
+
+            // Monta docs view
+            const dv = document.getElementById('docsView');
+            dv.innerHTML = `
+              <div class="success-banner">
+                <div class="sb-icon">🎉</div>
+                <div>
+                  <h4>Projeto gerado com sucesso!</h4>
+                  <p><strong>Pasta:</strong> ${payload.pasta}</p>
+                  <p>${payload.git}</p>
+                </div>
+              </div>
+              ${marked.parse(payload.docs || '')}
+            `;
+
+            // Ativa botão README
+            document.getElementById('btnDocs').style.borderColor = 'var(--accent3)';
+            document.getElementById('btnDocs').style.color = 'var(--accent3)';
+
+            terminar();
+            carregarProjetos(); // atualiza lista de projetos
+          }
+        } catch (_) { /* linha incompleta */ }
+      }
+    }
+  } catch (e) {
+    addLog(`🚨 Erro de conexão: ${e.message}`, 'erro');
+    terminar();
+  }
+}
+
+function terminar() {
+  executando = false;
+  const btn = document.getElementById('btnRun');
+  btn.disabled = false;
+  btn.innerHTML = '<span>⚡</span> Iniciar Linha de Produção';
+  document.getElementById('progressWrap').classList.remove('visible');
+  document.getElementById('statusTxt').textContent = 'pronto';
+}
+</script>
+</body>
+</html>
