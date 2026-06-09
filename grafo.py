@@ -13,12 +13,20 @@ _endpoint      = os.environ.get("LANGCHAIN_ENDPOINT", "https://api.smith.langcha
 
 if _langchain_key:
     os.environ["LANGCHAIN_API_KEY"]      = _langchain_key
-    os.environ["LANGCHAIN_TRACING_V2"]   = _tracing
+    os.environ["LANGCHAIN_TRACING_V2"]   = "true"   # força string "true" — não depende do Secret
     os.environ["LANGCHAIN_PROJECT"]      = _project
     os.environ["LANGCHAIN_ENDPOINT"]     = _endpoint
-    print(f"[LangSmith] ✅ Tracing ativo — projeto: {_project}")
+    # Força inicialização do cliente LangSmith AGORA, antes de qualquer import LangChain
+    try:
+        import langsmith
+        _ls_client = langsmith.Client(
+            api_key=_langchain_key,
+            api_url=_endpoint,
+        )
+        print(f"[LangSmith] ✅ Client inicializado — projeto: {_project}")
+    except Exception as _ls_err:
+        print(f"[LangSmith] ⚠️  Client falhou ao inicializar: {_ls_err}")
 else:
-    # Garante que o tracing fique desligado se não há chave (evita erros silenciosos)
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
     print("[LangSmith] ⚠️  LANGCHAIN_API_KEY não encontrada — tracing desativado.")
 # ────────────────────────────────────────────────────────────────────────────────

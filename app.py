@@ -203,43 +203,45 @@ def processar_execucao(modo, requisito, nome_projeto, projeto_existente, codigo_
             )
 
             def gerar_mermaid_deploy(codigo_json: str) -> str:
+                """
+                Gera flowchart TD simples — sem subgraph.
+                Mermaid v11 é muito rígido: nós dentro de subgraph precisam ser
+                declarados ANTES do subgraph, o que causa syntax error quando o
+                LLM gera JSON com subgraphs. Solução: ignorar subgraphs e gerar
+                apenas nós + arestas diretas, que funcionam em todas as versões.
+                """
                 try:
                     clean = re.sub(r"```[a-z]*|```", "", codigo_json).strip()
                     data = json.loads(clean)
                 except Exception:
                     return ""
+
+                # Mermaid v11: usar apenas formas compatíveis
+                # rect=[label]  cylinder[(label)]  diamond{label}  rounded(label)
                 shape_map = {
-                    "rect":    ("[",  "]"),
+                    "rect":     ("[",   "]"),
                     "cylinder": ("[(", ")]"),
-                    "diamond":  ("{",  "}"),
-                    "rounded":  ("(",  ")"),
+                    "diamond":  ("{",   "}"),
+                    "rounded":  ("(",   ")"),
                 }
+
                 lines = ["flowchart TD"]
-                for sg in data.get("subgraphs", []):
-                    sg_id    = re.sub(r"[^A-Za-z0-9_]", "_", sg["id"])
-                    sg_label = sg.get("label", sg_id)
-                    lines.append(f"  subgraph {sg_id}[{sg_label}]")
-                    for nid in sg.get("nodes", []):
-                        node = next((n for n in data["nodes"] if n["id"] == nid), None)
-                        if node:
-                            nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
-                            lbl = node.get("label", nid_safe)
-                            o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
-                            lines.append(f"    {nid_safe}{o}{lbl}{c}")
-                    lines.append("  end")
-                subgraph_nodes = {n for sg in data.get("subgraphs", []) for n in sg.get("nodes", [])}
+
+                # Declara todos os nós primeiro (obrigatório no Mermaid v11)
                 for node in data.get("nodes", []):
-                    if node["id"] not in subgraph_nodes:
-                        nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
-                        lbl = node.get("label", nid_safe)
-                        o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
-                        lines.append(f"  {nid_safe}{o}{lbl}{c}")
+                    nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
+                    lbl = re.sub(r'["\']', "", node.get("label", nid_safe))
+                    o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
+                    lines.append(f'  {nid_safe}{o}"{lbl}"{c}')
+
+                # Declara as arestas depois
                 for edge in data.get("edges", []):
                     frm   = re.sub(r"[^A-Za-z0-9_]", "_", edge["from"])
                     to    = re.sub(r"[^A-Za-z0-9_]", "_", edge["to"])
-                    lbl   = edge.get("label", "")
+                    lbl   = re.sub(r'["\'|]', "", edge.get("label", ""))
                     arrow = f"-->|{lbl}|" if lbl else "-->"
                     lines.append(f"  {frm} {arrow} {to}")
+
                 return "\n".join(lines)
 
             deploy_json    = llm_utils.invoke(prompt_deploy_json).content
