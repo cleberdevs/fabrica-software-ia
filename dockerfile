@@ -1,20 +1,19 @@
 
-FROM python:3.11-slim
+# Hugging Face Spaces — Docker SDK
+FROM python:3.11
+ 
+RUN useradd -m -u 1000 user
+USER user
+ENV PATH="/home/user/.local/bin:$PATH"
  
 WORKDIR /app
  
-# Copia dependências primeiro (cache de camadas)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --chown=user requirements.txt requirements.txt
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
  
-# Copia o restante do projeto
-COPY . .
+COPY --chown=user . /app
  
-# Cria pasta de projetos gerados
-RUN mkdir -p projetos_fabrica
+RUN mkdir -p /app/projetos_fabrica
  
-# Porta padrão do Hugging Face Spaces
-EXPOSE 7860
- 
-CMD ["python", "app.py"]
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
  
