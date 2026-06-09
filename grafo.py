@@ -1,35 +1,43 @@
 import subprocess, os
 
-# ── LangSmith: DEVE ser configurado ANTES de qualquer import LangChain/LangGraph ──
-# No Hugging Face Spaces, as variáveis vêm dos Secrets do painel (não de .env)
-# O dotenv.load_dotenv() apenas complementa para ambiente local
+# ── DIAGNÓSTICO: imprime todas as vars relevantes nos logs do HF Spaces ─────
 from dotenv import load_dotenv
-load_dotenv()  # carrega .env local (no HF Spaces é ignorado — secrets já estão no os.environ)
+load_dotenv()
 
-_langchain_key = os.environ.get("LANGCHAIN_API_KEY", "")
-_tracing       = os.environ.get("LANGCHAIN_TRACING_V2", "false")
+print("=" * 60)
+print("[DIAG] Variáveis de ambiente detectadas:")
+_key_raw = os.environ.get("LANGCHAIN_API_KEY", "")
+print(f"  LANGCHAIN_API_KEY    = {'SET (len=' + str(len(_key_raw)) + ')' if _key_raw else 'NÃO ENCONTRADA'}")
+print(f"  LANGCHAIN_TRACING_V2 = {os.environ.get('LANGCHAIN_TRACING_V2', 'NÃO ENCONTRADA')}")
+print(f"  LANGCHAIN_PROJECT    = {os.environ.get('LANGCHAIN_PROJECT',    'NÃO ENCONTRADA')}")
+print(f"  LANGCHAIN_ENDPOINT   = {os.environ.get('LANGCHAIN_ENDPOINT',   'NÃO ENCONTRADA')}")
+print(f"  OPENROUTER_API_KEY   = {'SET' if os.environ.get('OPENROUTER_API_KEY') else 'NÃO ENCONTRADA'}")
+print(f"  GOOGLE_API_KEY       = {'SET' if os.environ.get('GOOGLE_API_KEY')     else 'NÃO ENCONTRADA'}")
+print("=" * 60)
+# ────────────────────────────────────────────────────────────────────────────
+
+# ── LangSmith: DEVE ser configurado ANTES de qualquer import LangChain/LangGraph
+_langchain_key = _key_raw
 _project       = os.environ.get("LANGCHAIN_PROJECT", "fabrica-key-rotation")
 _endpoint      = os.environ.get("LANGCHAIN_ENDPOINT", "https://api.smith.langchain.com")
 
 if _langchain_key:
     os.environ["LANGCHAIN_API_KEY"]      = _langchain_key
-    os.environ["LANGCHAIN_TRACING_V2"]   = "true"   # força string "true" — não depende do Secret
+    os.environ["LANGCHAIN_TRACING_V2"]   = "true"
     os.environ["LANGCHAIN_PROJECT"]      = _project
     os.environ["LANGCHAIN_ENDPOINT"]     = _endpoint
-    # Força inicialização do cliente LangSmith AGORA, antes de qualquer import LangChain
     try:
         import langsmith
-        _ls_client = langsmith.Client(
-            api_key=_langchain_key,
-            api_url=_endpoint,
-        )
-        print(f"[LangSmith] ✅ Client inicializado — projeto: {_project}")
+        _ls_client = langsmith.Client(api_key=_langchain_key, api_url=_endpoint)
+        # Testa conexão real com o servidor
+        list(_ls_client.list_projects())
+        print(f"[LangSmith] ✅ Conexão OK — projeto: {_project}")
     except Exception as _ls_err:
-        print(f"[LangSmith] ⚠️  Client falhou ao inicializar: {_ls_err}")
+        print(f"[LangSmith] ❌ Erro de conexão: {_ls_err}")
 else:
     os.environ["LANGCHAIN_TRACING_V2"] = "false"
-    print("[LangSmith] ⚠️  LANGCHAIN_API_KEY não encontrada — tracing desativado.")
-# ────────────────────────────────────────────────────────────────────────────────
+    print("[LangSmith] ⚠️  LANGCHAIN_API_KEY ausente — tracing DESLIGADO.")
+# ────────────────────────────────────────────────────────────────────────────
 
 from pathlib import Path
 from typing import List, TypedDict
@@ -107,7 +115,7 @@ def obter_llm_openrouter(indice_modelo: int = 0):
     return ChatOpenAI(
         model=modelo,
         temperature=0.1,
-        max_tokens=8192,
+        max_tokens=32768,  # aumentado para evitar JSON truncado
         openai_api_key=pool_manager.obter_chave("openrouter"),
         openai_api_base="https://openrouter.ai/api/v1"
     )
@@ -189,24 +197,79 @@ def agente_chief_tier0(state):
     return executar_com_failover(state, "openrouter", acao)
 
 
+def _reparar_json_truncado(texto: str) -> str:
+    """
+    Repara JSON truncado por max_tokens: fecha strings e estruturas abertas.
+    """
+    texto = texto.rstrip().rstrip(",")
+    profundidade = []
+    dentro_string = False
+    escape = False
+    for c in texto:
+        if escape:
+            escape = False
+            continue
+        if c == "\\" and dentro_string:
+            escape = True
+            continue
+        if c == '"':
+            dentro_string = not dentro_string
+            continue
+        if dentro_string:
+            continue
+        if c in ("{", "["):
+            profundidade.append(c)
+        elif c in ("}", "]"):
+            if profundidade:
+                profundidade.pop()
+    reparado = texto
+    if dentro_string:
+        reparado += '"'
+    reparado = reparado.rstrip().rstrip(",")
+    for abertura in reversed(profundidade):
+        reparado += "}" if abertura == "{" else "]"
+    return reparado
+
+
 def _parsear_componente(texto: str) -> ComponenteMultiLinguagem:
-    """Extrai JSON do texto mesmo que o modelo adicione explicações ao redor."""
+    """
+    Extrai e parseia JSON do output do modelo.
+    Lida com: texto ao redor, blocos markdown, e JSON truncado por max_tokens.
+    """
     import json, re
 
-    try:
-        return ComponenteMultiLinguagem(**json.loads(texto))
-    except Exception:
-        pass
+    def tentar(s: str):
+        s = s.strip()
+        try:
+            return ComponenteMultiLinguagem(**json.loads(s))
+        except Exception:
+            pass
+        try:
+            return ComponenteMultiLinguagem(**json.loads(_reparar_json_truncado(s)))
+        except Exception:
+            pass
+        return None
 
-    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", texto, re.DOTALL)
-    if match:
-        return ComponenteMultiLinguagem(**json.loads(match.group(1)))
+    r = tentar(texto)
+    if r:
+        return r
 
-    match = re.search(r"\{.*\}", texto, re.DOTALL)
-    if match:
-        return ComponenteMultiLinguagem(**json.loads(match.group(0)))
+    m = re.search(r"```(?:json)?\s*(\{.*?)(?:```|$)", texto, re.DOTALL)
+    if m:
+        r = tentar(m.group(1))
+        if r:
+            return r
 
-    raise ValueError(f"Não foi possível extrair JSON do output do modelo:\n{texto[:300]}")
+    m = re.search(r"\{.*", texto, re.DOTALL)
+    if m:
+        r = tentar(m.group(0))
+        if r:
+            return r
+
+    raise ValueError(
+        f"JSON inválido após tentativas de reparo.\n"
+        f"Início: {texto[:300]}\nFim: {texto[-200:]}"
+    )
 
 
 def agente_desenvolvedor_tier2(state):
