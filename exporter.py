@@ -2,13 +2,40 @@ import os, subprocess, json, urllib.request
 from pathlib import Path
 
 
+def _detectar_tipo_owner(owner: str, token: str) -> str:
+    """Retorna 'org' se o owner for uma organização, 'user' caso contrário."""
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/users/{owner}",
+            headers={
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github.v3+json",
+                "User-Agent": "Fabrica-Agentes-IA"
+            }
+        )
+        with urllib.request.urlopen(req) as res:
+            data = json.loads(res.read().decode())
+            return "org" if data.get("type") == "Organization" else "user"
+    except Exception:
+        return "user"
+
+
 def criar_repositorio_remoto_no_github(nome_repo: str, token: str) -> bool:
-    # URL correta da API REST do GitHub
-    url = "https://api.github.com/user/repos"
+    owner = os.getenv("GITHUB_USER", "")
+    tipo  = _detectar_tipo_owner(owner, token) if owner else "user"
+
+    # Organização usa /orgs/{org}/repos, usuário pessoal usa /user/repos
+    if tipo == "org" and owner:
+        url = f"https://api.github.com/orgs/{owner}/repos"
+        print(f"[exporter] Criando repo em organização: {owner}")
+    else:
+        url = "https://api.github.com/user/repos"
+        print(f"[exporter] Criando repo em conta pessoal")
+
     payload = json.dumps({
-        "name": nome_repo,
+        "name":        nome_repo,
         "description": "Microservico corporativo multinivel gerado por Fabrica AI.",
-        "private": True
+        "private":     True
     }).encode("utf-8")
     headers = {
         "Authorization": f"token {token}",
@@ -18,9 +45,19 @@ def criar_repositorio_remoto_no_github(nome_repo: str, token: str) -> bool:
     req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req) as res:
-            return res.status == 201
+            sucesso = res.status == 201
+            if sucesso:
+                print(f"[exporter] Repo criado com sucesso.")
+            return sucesso
+    except urllib.error.HTTPError as e:
+        body = e.read().decode()
+        if e.code == 422 and "already exists" in body:
+            print(f"[exporter] Repo ja existe — prosseguindo com push.")
+            return True
+        print(f"[exporter] Erro HTTP {e.code}: {body[:200]}")
+        return False
     except Exception as e:
-        print(f"[exporter] Erro ao criar repositório no GitHub: {e}")
+        print(f"[exporter] Erro ao criar repositorio: {e}")
         return False
 
 
