@@ -18,7 +18,7 @@ pinned: false
 
 Uma esteira de governança de software que elimina alucinações de escopo, falhas conceituais e brechas de segurança comuns em geradores de código genéricos. O código só chega ao disco e ao GitHub se passar por **todos os portões de qualidade** — auditoria semântica (score ≥ 80), SAST via Bandit e sandbox de testes PyTest.
 
-Suporta geração, evolução incremental e debug de microsserviços corporativos em **5 linguagens**, com publicação automatizada de repositórios privados no GitHub.
+Suporta geração, evolução incremental, debug e refatoração de microsserviços corporativos em **5 linguagens**, com publicação automatizada no GitHub seguindo o fluxo **GitFlow completo**.
 
 ---
 
@@ -31,7 +31,7 @@ Suporta geração, evolução incremental e debug de microsserviços corporativo
 | **Tier 3 / QA** | Quality Gate, Testes e Documentação | `google/gemini-2.5-flash-lite` |
 | **Visão** | Análise multimodal de imagens e diagramas | `google/gemma-4-31b-it:free` |
 
-> **Custo zero de tokens:** toda a esteira roda sobre a camada gratuita do OpenRouter. A fábrica rotaciona automaticamente entre modelos e chaves de API quando há rate limit — basta separar múltiplas chaves por vírgula em `OPENROUTER_API_KEY`.
+> **Fallback inteligente:** o Tier 2 faz fallback automático em caso de rate limit (429) **e** créditos insuficientes (402) — tenta `deepseek-v4-pro` → `kimi-k2` → `qwen3-coder-next` sem intervenção manual. Para rate limit aplica espera progressiva (10s → 30s → 60s → 120s → 180s); para 402 vai direto ao modelo mais barato sem espera.
 
 ---
 
@@ -60,7 +60,7 @@ Traduz o plano do Chief em código-fonte em **Clean Architecture** com 4 camadas
 - `camada_infra_banco` — Persistência via ORM nativo
 - `camada_infra_web` — Controladores HTTP / rotas do framework escolhido
 
-Possui **fallback automático** entre modelos com espera progressiva em caso de rate limit: 10s → 30s → 60s → 120s → 180s.
+Possui **fallback automático** entre modelos com tratamento de rate limit (429) e créditos insuficientes (402).
 
 ### Tier 3 — Quality Gate (Auditor Semântico)
 Avalia notas de 0–100 para *Clean Code* (SOLID) e *Clean Architecture* (isolamento de camadas). Média < 80 devolve ao Dev para refatoração automática.
@@ -77,13 +77,121 @@ Executa a suíte de testes em subprocess isolado. Falha aciona novo ciclo a part
 ### Tech Writer — Documentador Final
 Gera via JSON estruturado (sem markdown livre):
 - `README.md` com instruções Docker
-- Diagrama de classes Mermaid (`classDiagram`)
-- Diagrama de deploy Docker Mermaid (`flowchart TD`)
+- Diagrama de classes Mermaid (`classDiagram`) — labels sanitizados para compatibilidade total
+- Diagrama de deploy Docker Mermaid (`flowchart TD`) — labels sanitizados para compatibilidade total
 - `openapi.json` — contrato Swagger/OpenAPI v3
 
 ---
 
-## 📂 Estrutura do Repositório
+## 🔀 GitFlow Automatizado
+
+A fábrica implementa GitFlow completo com numeração sequencial de features **por projeto**.
+
+### Nomenclatura de branches
+
+| Modo | Branch criada | Prefixo de commit |
+|------|--------------|-------------------|
+| **Novo** | `feature/<n>/<nome>` | `feat` |
+| **Evoluir** | `feature/<n>/<nome>` | `feat` |
+| **Debug** | `fix/<n>/<nome>` | `fix` |
+| **Refatorar** | `refactor/<n>/<nome>` | `refactor` |
+
+O número `<n>` é sequencial por projeto, armazenado em `projetos_fabrica/<nome>/.feature_counter`.
+
+### Fluxo completo por execução
+
+```
+INÍCIO DA ESTEIRA
+  ↓
+Cria pasta + repo privado no GitHub (conta pessoal)
+  ↓
+git init → main → develop → feature/<n>/<nome>
+  ↓
+[LangGraph executa — Chief → Dev → QA → SAST → Testes]
+  ↓
+FIM DA ESTEIRA (guardrails aprovados)
+  ↓
+1 commit por camada com mensagem descritiva:
+  feat(#1/nome): [dominio] entidades, value objects e contratos de interface
+  feat(#1/nome): [aplicacao] casos de uso, servicos e regras de negocio
+  feat(#1/nome): [infra/banco] persistencia, ORM e repositorios
+  feat(#1/nome): [infra/web] rotas HTTP, controladores e middlewares
+  feat(#1/nome): [testes] suite de testes unitarios com mocks
+  feat(#1/nome): [deps] arquivo de dependencias atualizado
+  feat(#1/nome): [docs] README, openapi.json, Dockerfile e docker-compose
+  feat(#1/nome): feature #1 nome finalizada ✅ [dd/mm/yyyy hh:mm]
+  ↓
+Push feature/<n>/<nome> → origin
+  ↓
+PR aberto: feature/<n>/<nome> → develop
+  ↓
+Merge automático: feature → develop ✅
+  ↓
+PR develop → main fica disponível para revisão manual
+```
+
+### Repositório no GitHub — o que você verá
+
+Após a execução, o repositório gerado terá:
+
+```
+main        ← produção (você faz o merge manualmente)
+develop     ← integração (merge automático da feature)
+feature/1/nome  ← branch da fábrica (mergeada no develop)
+```
+
+---
+
+## 🖥️ Modos de Operação (Interface Web)
+
+| Modo | Branch | Descrição |
+|------|--------|-----------|
+| **🏗️ Novo** | `feature/<n>/<nome>` | Cria repo + gera projeto completo do zero |
+| **⚙️ Evoluir** | `feature/<n>/<nome>` | Adiciona nova funcionalidade ao projeto existente |
+| **🚨 Debug** | `fix/<n>/<nome>` | Corrige defeito com stack trace fornecido |
+| **♻️ Refatorar** | `refactor/<n>/<nome>` | Reestrutura código sem alterar comportamento externo |
+
+### Refatoração — instrução opcional
+No modo Refatorar, o campo de instrução é opcional. Se deixado vazio, a fábrica aplica automaticamente SOLID, DRY, KISS e Clean Architecture. Se preenchido, usa a instrução do usuário como foco prioritário — mantendo sempre as regras de não alterar contratos de API e manter testes passando.
+
+### Anexos Suportados
+
+| Tipo | Extensões | Processamento |
+|------|-----------|---------------|
+| Planilhas | `.csv`, `.xlsx` | Convertidas para Markdown e injetadas no contexto do Chief |
+| Contratos | `.json`, `.yaml`, `.yml` | Injetados como especificação de API |
+| Imagens | `.png`, `.jpg`, `.webp` | Analisadas via modelo de visão multimodal (`gemma-4-31b-it`) |
+
+### Resposta em Tempo Real (SSE)
+A interface recebe o log da esteira em **Server-Sent Events** — cada etapa do LangGraph aparece na tela assim que é concluída, sem polling.
+
+---
+
+## 📦 Saídas por Projeto
+
+Cada projeto gerado em `projetos_fabrica/<nome>/` contém:
+
+```
+<nome>/
+├── .feature_counter    # Contador sequencial de features do projeto
+├── .gitignore
+├── app/
+│   ├── domain/         # Entidades puras (camada_dominio)
+│   ├── use_cases/      # Casos de uso (camada_aplicacao)
+│   └── adapters/
+│       ├── repository  # ORM e persistência (camada_infra_banco)
+│       └── http_api    # Rotas HTTP (camada_infra_web)
+├── tests/              # Suíte de testes gerada pelo QA
+├── openapi.json        # Contrato Swagger/OpenAPI v3
+├── requirements.txt    # Dependências do projeto
+├── Dockerfile          # Container do projeto gerado
+├── docker-compose.yml  # Stack completa com PostgreSQL
+└── README.md           # Manual com diagramas Mermaid e instruções Docker
+```
+
+---
+
+## 📂 Estrutura do Repositório da Fábrica
 
 ```
 fabrica-software-ia/
@@ -97,7 +205,7 @@ fabrica-software-ia/
 ├── Dockerfile                 # Container para o HF Spaces (SDK: docker)
 ├── requirements.txt           # Dependências da fábrica
 ├── grafo.py                   # Motor LangGraph — agentes, guardrails e failover
-├── exporter.py                # Publica no GitHub com auto-criação de repo privado
+├── exporter.py                # GitFlow + publicação no GitHub
 ├── enviar_chaves.py           # Utilitário para configurar variáveis no HF Spaces
 ├── index.html                 # Interface web (servida pelo FastAPI)
 └── app.py                     # Servidor FastAPI — entrypoint do Hugging Face
@@ -129,46 +237,10 @@ fabrica-software-ia/
 [Tech Writer → README + Mermaid + OpenAPI]
       │
       ▼
-[Exporter → GitHub + Disco]
-```
-
----
-
-## 🖥️ Modos de Operação (Interface Web)
-
-| Modo | Descrição |
-|------|-----------|
-| **🏗️ Novo** | Requisitos em texto + anexos opcionais. Gera o projeto completo do zero. |
-| **⚙️ Evoluir** | Seleciona projeto existente e descreve a nova funcionalidade a injetar. |
-| **🚨 Debug** | Cola código quebrado + stack trace. Ciclo autônomo de diagnóstico e correção. |
-
-### Anexos Suportados
-
-| Tipo | Extensões | Processamento |
-|------|-----------|---------------|
-| Planilhas | `.csv`, `.xlsx` | Convertidas para Markdown e injetadas no contexto do Chief |
-| Contratos | `.json`, `.yaml`, `.yml` | Injetados como especificação de API |
-| Imagens | `.png`, `.jpg`, `.webp` | Analisadas via modelo de visão multimodal (`gemma-4-31b-it`) |
-
-### Resposta em Tempo Real (SSE)
-A interface recebe o log da esteira em **Server-Sent Events** — cada etapa do LangGraph aparece na tela assim que é concluída, sem polling.
-
----
-
-## 📦 Saídas por Projeto
-
-Cada projeto gerado em `projetos_fabrica/<nome>/` contém:
-
-```
-<nome>/
-├── domain/             # Entidades puras (camada_dominio)
-├── application/        # Casos de uso (camada_aplicacao)
-├── infrastructure/
-│   ├── database/       # ORM e persistência (camada_infra_banco)
-│   └── web/            # Rotas HTTP (camada_infra_web)
-├── tests/              # Suíte de testes gerada pelo QA
-├── openapi.json        # Contrato Swagger/OpenAPI v3
-└── README.md           # Manual com diagramas Mermaid e instruções Docker
+[Exporter → GitFlow → GitHub]
+      │
+      ├── feature/<n>/<nome> → develop  (merge automático)
+      └── develop → main                (revisão manual)
 ```
 
 ---
@@ -192,10 +264,12 @@ Em **Settings → Variables and secrets** do seu Space:
 | `OPENROUTER_API_KEY` | Chave(s) do OpenRouter — separe múltiplas por vírgula para rotação automática |
 | `GOOGLE_API_KEY` | Chave da Google AI Studio (Gemini) — opcional |
 | `LANGCHAIN_API_KEY` | Chave do LangSmith (rastreamento de execuções) |
-| `LANGCHAIN_TRACING_V2` | `true` |
+| `LANGCHAIN_TRACING_V2` | `true` para ativar, `false` para desativar |
 | `LANGCHAIN_PROJECT` | `fabrica-key-rotation` |
-| `GITHUB_TOKEN` | Token Classic com escopo `repo` para publicação automática |
-| `GITHUB_USER` | Seu nome de usuário do GitHub |
+| `GITHUB_TOKEN` | Token Classic com escopo `repo` — gerado na conta pessoal em github.com/settings/tokens |
+| `GITHUB_USER` | Seu nome de usuário pessoal do GitHub |
+
+> **Atenção:** o `GITHUB_TOKEN` deve ser gerado estando logado na sua **conta pessoal** (não em uma organização). Tokens gerados em contexto de organização retornam 403 ao tentar criar repositórios via `/user/repos`.
 
 ---
 
@@ -208,65 +282,54 @@ O LangSmith é a camada de **observabilidade** da fábrica. Toda execução do g
 O LangSmith captura o `EstadoEngenharia` completo (o TypedDict que trafega entre os nós do grafo) em cada transição. Na prática, para cada execução você vê:
 
 #### Nó `chief` — Chief AI Officer
-- **Entrada:** `requisito`, `codigo_legado`, `contexto_arquivos` (planilhas/contratos/visão de imagens), `linguagem_selecionada`, `framework_selecionado`
+- **Entrada:** `requisito`, `codigo_legado`, `contexto_arquivos`, `linguagem_selecionada`, `framework_selecionado`
 - **Saída:** `plano_do_chief` — o plano arquitetural completo gerado pelo Gemini 2.5 Flash Lite
-- **LLM call:** prompt exato enviado ao `google/gemini-2.5-flash-lite` via OpenRouter + resposta bruta + tokens + latência
+- **LLM call:** prompt exato + resposta bruta + tokens + latência
 
 #### Nó `desenvolvedor` — Especialista Dev Tier 2
-- **Entrada:** `plano_do_chief` + `historico_erros` (feedbacks de ciclos anteriores)
-- **Saída:** objeto `ComponenteMultiLinguagem` com as 4 camadas de código em JSON estruturado
-- **LLM call:** qual modelo foi usado (`deepseek-v4-pro`, `kimi-k2` ou `qwen3-coder-next`), quantas tentativas de failover ocorreram, esperas progressivas aplicadas (10s → 30s → 60s → 120s → 180s)
-- **Fallback:** cada troca de modelo pelo `executar_com_failover` aparece como uma sub-run separada
+- **Entrada:** `plano_do_chief` + `historico_erros`
+- **Saída:** objeto `ComponenteMultiLinguagem` com as 4 camadas em JSON estruturado
+- **LLM call:** qual modelo foi usado, quantas tentativas de failover (429 ou 402), esperas aplicadas
+- **Fallback:** cada troca de modelo aparece como sub-run separada
 
 #### Nó `quality_gate` — Auditor Semântico Tier 3
 - **Entrada:** `camada_dominio` + `camada_aplicacao` + `camada_infra_web`
 - **Saída:** `QualityReport` com `score_clean_code` (0–100), `score_arquitetura` (0–100) e `justificativa_critica`
-- **Decisão de roteamento:** se a média dos scores for < 80, o roteador manda de volta ao `desenvolvedor` — cada ciclo de reprovação fica registrado com os scores exatos
+- **Decisão de roteamento:** ciclos de reprovação (score < 80) registrados com scores exatos
 
-#### Nó `sast` — Sandbox Bandit (Python)
-- **Entrada:** as 4 camadas de código escritas em `app_code_temp.py`
-- **Saída:** `returncode` do Bandit + stdout completo com as vulnerabilidades encontradas
-- **Em caso de falha:** o log do Bandit é appended em `historico_erros` e o roteador dispara `chief_retry`
+#### Nó `sast` — Sandbox Bandit
+- **Entrada:** 4 camadas escritas em `app_code_temp.py`
+- **Saída:** `returncode` do Bandit + stdout com vulnerabilidades
 
 #### Nó `gerador_testes` — Agente QA
-- **Entrada:** `camada_infra_web` (rotas HTTP do projeto)
-- **Saída:** objeto `UnitTestComponent` com a suíte de testes completa em mock
-- **LLM call:** chamada ao `gemini-2.5-flash-lite` com output estruturado via Pydantic
+- **Entrada:** `camada_infra_web`
+- **Saída:** `UnitTestComponent` com suíte de testes completa
 
 #### Nó `executor_pytest` — Runtime Sandbox
-- **Entrada:** código de produção (`app_code.py`) + testes (`test_app.py`) escritos em disco
+- **Entrada:** `app_code.py` + `test_app.py` em disco
 - **Saída:** `returncode` do PyTest + stdout com resultado de cada teste
-- **Em caso de falha:** stderr/stdout do PyTest appended em `historico_erros`, roteador dispara `chief_retry`
 
 ### Custos visíveis no LangSmith
 
-Como todos os modelos passam pelo OpenRouter, o LangSmith registra:
-
 | Métrica | O que aparece |
 |---------|---------------|
-| **Tokens de entrada** | Tamanho do prompt por chamada — útil para ver quanto o código legado ou histórico de erros pesa no contexto |
-| **Tokens de saída** | Tamanho do JSON gerado por camada de código |
-| **Latência por nó** | Tempo de resposta de cada modelo — permite comparar deepseek vs kimi vs qwen na prática |
-| **Número de retries** | Quantos ciclos quality_gate → desenvolvedor ocorreram até aprovação |
+| **Tokens de entrada** | Tamanho do prompt por chamada |
+| **Tokens de saída** | Tamanho do JSON gerado por camada |
+| **Latência por nó** | Tempo de resposta de cada modelo |
+| **Número de retries** | Ciclos quality_gate → desenvolvedor até aprovação |
 | **Total da run** | Tempo de ponta a ponta da esteira completa |
 
-> O custo financeiro real é gerenciado pelo OpenRouter (não pelo LangSmith). O LangSmith mostra a contagem de tokens; o painel do OpenRouter em [openrouter.ai/activity](https://openrouter.ai/activity) mostra o custo em dólares por chamada.
-
-### Como acessar
-
-1. Acesse [smith.langchain.com](https://smith.langchain.com)
-2. Selecione o projeto **`fabrica-key-rotation`**
-3. Cada execução aparece como uma árvore com 6 nós expansíveis — clique em qualquer nó para ver o estado de entrada, saída e os prompts exatos enviados a cada modelo
+> O custo financeiro real é gerenciado pelo OpenRouter. O painel em [openrouter.ai/activity](https://openrouter.ai/activity) mostra o custo em dólares por chamada.
 
 ### Como configurar
 
 | Variável | Valor |
 |----------|-------|
 | `LANGCHAIN_API_KEY` | Chave gerada em smith.langchain.com → Settings → API Keys |
-| `LANGCHAIN_TRACING_V2` | `true` para ativar, `false` para desativar sem alterar o código |
-| `LANGCHAIN_PROJECT` | `fabrica-key-rotation` — nome do projeto no painel do LangSmith |
+| `LANGCHAIN_TRACING_V2` | `true` para ativar, `false` para desativar |
+| `LANGCHAIN_PROJECT` | `fabrica-key-rotation` |
 
-> **Erro 403 Forbidden:** a chave está inválida ou expirada. Gere uma nova em smith.langchain.com ou mude `LANGCHAIN_TRACING_V2` para `false` — a fábrica funciona normalmente sem rastreamento.
+> **Erro 403 Forbidden:** chave inválida ou expirada. Gere uma nova em smith.langchain.com ou mude `LANGCHAIN_TRACING_V2` para `false`.
 
 ---
 
@@ -282,7 +345,7 @@ pip install -r requirements.txt
 
 # Configure as chaves
 cp .env.example .env
-# Preencha OPENROUTER_API_KEY, GITHUB_TOKEN, etc.
+# Preencha OPENROUTER_API_KEY, GITHUB_TOKEN, GITHUB_USER etc.
 
 # Suba o servidor
 python app.py
@@ -301,15 +364,19 @@ git push origin main
 
 O GitHub Actions espelha o código e o Hugging Face reconstrói o container automaticamente.
 
-### Dockerfile (necessário para SDK docker)
+### Dockerfile
 
 ```dockerfile
-FROM python:3.11-slim
+FROM python:3.11
+RUN useradd -m -u 1000 user
+USER user
+ENV PATH="/home/user/.local/bin:$PATH"
 WORKDIR /app
-COPY . .
-RUN pip install --no-cache-dir -r requirements.txt
-EXPOSE 7860
-CMD ["python", "app.py"]
+COPY --chown=user requirements.txt requirements.txt
+RUN pip install --no-cache-dir --upgrade -r requirements.txt
+COPY --chown=user . /app
+RUN mkdir -p /app/projetos_fabrica
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]
 ```
 
 ---
@@ -338,6 +405,7 @@ PyGithub
 
 - Nenhuma chave de API é exposta em código ou logs
 - Arquivo `.env` listado no `.gitignore`
+- `GITHUB_TOKEN` nunca é logado — usado apenas em URLs autenticadas em memória
 - Análise SAST com Bandit em todo código Python gerado
 - Testes executados em subprocess isolado antes da escrita em disco
 - Código só chega ao GitHub após aprovação em todos os guardrails
