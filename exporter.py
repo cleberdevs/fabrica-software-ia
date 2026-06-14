@@ -106,7 +106,7 @@ def _url_autenticada(user: str, token: str, repo: str) -> str:
 
 def _gh_request(endpoint: str, token: str, payload: dict = None, method: str = "POST") -> dict | None:
     url = f"https://api.github.com{endpoint}"
-    data = json.dumps(payload).encode("utf-8") if payload and method != "GET" else None
+    data = json.dumps(payload).encode("utf-8") if payload and method in ("POST", "PUT", "PATCH") else None
     headers = {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github.v3+json",
@@ -170,10 +170,11 @@ def _merge_pull_request(nome_repo: str, token: str, user: str,
     r = _gh_request(
         f"/repos/{user}/{nome_repo}/pulls/{pr_number}/merge",
         token,
-        {
+        payload={
             "commit_title": commit_msg,
-            "merge_method": "merge",   # preserva histórico completo
-        }
+            "merge_method": "merge",
+        },
+        method="PUT",
     )
     if r and r.get("merged"):
         return True
@@ -528,12 +529,17 @@ def exportar_para_estrutura_clean_arch(
         return False
 
     # ── Merge automático: feature → develop ──────────────────────────────
-    pr_number = _obter_numero_pr(base.name, token, user, branch, "develop")
-    if pr_number:
+    # Extrai o número do PR direto da URL retornada (ex: .../pull/3 → 3)
+    try:
+        pr_number = int(pr_url.rstrip("/").split("/")[-1])
         merged = _merge_pull_request(base.name, token, user, pr_number,
                                      f"Merge automático: {branch} → develop")
         if merged:
             print(f"[exporter] ✅ Merge concluído: {branch} → develop")
             print(f"[exporter] 📋 PR develop → main disponível para revisão manual no GitHub")
+        else:
+            print(f"[exporter] ⚠️ PR #{pr_number} criado mas merge falhou — faça o merge manualmente em {pr_url}")
+    except Exception as e:
+        print(f"[exporter] ⚠️ Não foi possível fazer merge automático: {e} — faça manualmente em {pr_url}")
 
     return True
