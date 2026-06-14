@@ -154,12 +154,13 @@ def _abrir_pull_request(nome_repo: str, token: str, user: str,
 def _obter_numero_pr(nome_repo: str, token: str, user: str,
                      head: str, base: str) -> int | None:
     """Busca o número do PR aberto de head → base."""
-    r = _gh_request(
-        f"/repos/{user}/{nome_repo}/pulls?state=open&head={user}:{head}&base={base}",
-        token, method="GET"
-    )
-    if r and isinstance(r, list) and len(r) > 0:
-        return r[0].get("number")
+    # Usa parâmetros de query separados para evitar problemas de encoding
+    endpoint = f"/repos/{user}/{nome_repo}/pulls?state=open&base={base}"
+    r = _gh_request(endpoint, token, method="GET")
+    if r and isinstance(r, list):
+        for pr in r:
+            if pr.get("head", {}).get("ref") == head:
+                return pr.get("number")
     return None
 
 
