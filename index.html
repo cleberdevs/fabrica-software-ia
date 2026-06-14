@@ -98,7 +98,7 @@
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
 
   /* ── Mode tabs ── */
-  .mode-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+  .mode-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
   .mode-tab {
     background: var(--bg); border: 1px solid var(--border);
     border-radius: 6px; padding: .5rem .4rem; cursor: pointer;
@@ -291,6 +291,9 @@
           <div class="mode-tab" data-mode="debug" onclick="setModo('debug', this)">
             <span class="micon">🚨</span>Debug
           </div>
+          <div class="mode-tab" data-mode="refatorar" onclick="setModo('refatorar', this)">
+            <span class="micon">♻️</span>Refatorar
+          </div>
         </div>
 
         <!-- NOVO -->
@@ -314,6 +317,18 @@
           <div>
             <label>Nova funcionalidade</label>
             <textarea id="nova_funcionalidade" placeholder="Ex: Adicione uma rota GET /historico que retorna os últimos 50 pedidos paginados." rows="4"></textarea>
+          </div>
+        </div>
+
+        <!-- REFATORAR -->
+        <div class="mode-panel" id="panel-refatorar">
+          <div>
+            <label>Projeto a refatorar</label>
+            <select id="projeto_existente_ref"><option value="">Carregando...</option></select>
+          </div>
+          <div>
+            <label>Instrução de refatoração <span style="color:var(--muted);font-weight:400">(opcional)</span></label>
+            <textarea id="instrucao_refatoracao" placeholder="Deixe vazio para aplicar boas práticas padrão (SOLID, DRY, KISS, Clean Architecture).&#10;&#10;Ou descreva o foco: Ex: Extraia interfaces para os repositórios e elimine código duplicado entre os serviços." rows="4"></textarea>
           </div>
         </div>
 
@@ -412,7 +427,7 @@ async function carregarProjetos() {
     const data = await r.json();
     const projetos = data.projetos || [];
 
-    ['projeto_existente_evo', 'projeto_existente_debug'].forEach(id => {
+    ['projeto_existente_evo', 'projeto_existente_debug', 'projeto_existente_ref'].forEach(id => {
       const sel = document.getElementById(id);
       sel.innerHTML = projetos.length
         ? projetos.map(p => `<option value="${p}">${p}</option>`).join('')
@@ -526,6 +541,9 @@ async function executar() {
   } else if (modoAtual === 'evoluir') {
     fd.append('projeto_existente', document.getElementById('projeto_existente_evo').value);
     fd.append('nova_funcionalidade', document.getElementById('nova_funcionalidade').value);
+  } else if (modoAtual === 'refatorar') {
+    fd.append('projeto_existente', document.getElementById('projeto_existente_ref').value);
+    fd.append('instrucao_refatoracao', document.getElementById('instrucao_refatoracao').value);
   } else {
     fd.append('projeto_existente', document.getElementById('projeto_existente_debug').value);
     fd.append('codigo_quebrado', document.getElementById('codigo_quebrado').value);

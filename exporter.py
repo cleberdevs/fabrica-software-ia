@@ -1,214 +1,497 @@
-import os, subprocess, json, urllib.request
+"""
+exporter.py — Publicador GitFlow da Fábrica de Software IA
+
+Convenções de nomenclatura:
+  Branch feature:  feature/<numero>/<nome-do-sistema>
+  Branch fix:      fix/<numero>/<nome-do-sistema>
+  Número de feature: contador sequencial por projeto em projetos_fabrica/<nome>/.feature_counter
+
+Commits por camada (descritivos):
+  feat(#1/nome): [dominio] entidades, value objects e contratos de interface
+  feat(#1/nome): [aplicacao] casos de uso, servicos e regras de negocio
+  feat(#1/nome): [infra/banco] persistencia, ORM e repositorios
+  feat(#1/nome): [infra/web] rotas HTTP, controladores e middlewares <framework>
+  feat(#1/nome): [testes] suite de testes unitarios com mocks — <linguagem>
+  feat(#1/nome): [deps] arquivo de dependencias <dep_file> atualizado
+  feat(#1/nome): [docs] README, openapi.json, Dockerfile e docker-compose
+  feat(#1/nome): feature #1 <nome-do-sistema> finalizada ✅ [dd/mm/yyyy hh:mm]
+
+Fluxo:
+  ETAPA 1 — inicializar_repositorio_local(nome)   ← chamado ANTES do LangGraph
+    → cria projetos_fabrica/<nome>/
+    → incrementa projetos_fabrica/<nome>/.feature_counter
+    → cria repo privado na conta pessoal do GitHub (/user/repos)
+    → git init + branches main → develop → feature/<n>/<nome>
+    → push das 3 branches para o GitHub
+    → retorna (Path, numero_feature, nome_branch)
+
+  ETAPA 2 — exportar_para_estrutura_clean_arch()  ← chamado APÓS todos os guardrails
+    → escreve arquivos das 4 camadas Clean Architecture
+    → 1 commit por camada com mensagem descritiva
+    → commit de encerramento: feature #n <nome> finalizada ✅
+    → push feature/<n>/<nome> → origin
+    → abre Pull Request feature → develop via API GitHub
+"""
+
+import os
+import re
+import json
+import subprocess
+import urllib.request
+import urllib.error
 from pathlib import Path
+from datetime import datetime
 
 
-def _detectar_tipo_owner(owner: str, token: str) -> str:
-    """Retorna 'org' se o owner for uma organização, 'user' caso contrário."""
+# Tipos de operação em projetos existentes
+TIPO_FEATURE  = "feature"   # evoluir — adiciona funcionalidade
+TIPO_FIX      = "fix"       # debug   — corrige defeito
+TIPO_REFACTOR = "refactor"  # refatorar — reestrutura sem mudar comportamento
+
+
+
+
+# ── Contador de features ───────────────────────────────────────────────────
+
+def _proximo_numero_feature(base: Path) -> int:
+    """Lê e incrementa o contador de features do projeto em base/.feature_counter."""
+    counter_file = base / ".feature_counter"
+    base.mkdir(parents=True, exist_ok=True)
     try:
-        req = urllib.request.Request(
-            f"https://api.github.com/users/{owner}",
-            headers={
-                "Authorization": f"token {token}",
-                "Accept": "application/vnd.github.v3+json",
-                "User-Agent": "Fabrica-Agentes-IA"
-            }
-        )
-        with urllib.request.urlopen(req) as res:
-            data = json.loads(res.read().decode())
-            return "org" if data.get("type") == "Organization" else "user"
+        n = int(counter_file.read_text().strip())
     except Exception:
-        return "user"
+        n = 0
+    n += 1
+    counter_file.write_text(str(n))
+    return n
 
 
-def criar_repositorio_remoto_no_github(nome_repo: str, token: str) -> bool:
-    owner = os.getenv("GITHUB_USER", "")
-    tipo  = _detectar_tipo_owner(owner, token) if owner else "user"
+def _slug(nome: str) -> str:
+    """Converte nome do projeto em slug seguro para branch git."""
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", nome).lower().strip("-")
 
-    # Organização usa /orgs/{org}/repos, usuário pessoal usa /user/repos
-    if tipo == "org" and owner:
-        url = f"https://api.github.com/orgs/{owner}/repos"
-        print(f"[exporter] Criando repo em organização: {owner}")
-    else:
-        url = "https://api.github.com/user/repos"
-        print(f"[exporter] Criando repo em conta pessoal")
 
-    payload = json.dumps({
-        "name":        nome_repo,
-        "description": "Microservico corporativo multinivel gerado por Fabrica AI.",
-        "private":     True
-    }).encode("utf-8")
+def _nome_branch(numero: int, nome_projeto: str, fix: bool = False) -> str:
+    """
+    Gera nome da branch no padrão GitFlow:
+      feature/1/meu-sistema
+      fix/2/meu-sistema
+    """
+    prefix = "fix" if fix else "feature"
+    return f"{prefix}/{numero}/{_slug(nome_projeto)}"
+
+
+# ── Helpers Git ────────────────────────────────────────────────────────────
+
+def _git(cmd: list, cwd: Path, check: bool = True) -> tuple[bool, str]:
+    try:
+        res = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=check)
+        return True, res.stdout.strip()
+    except subprocess.CalledProcessError as e:
+        print(f"[exporter] Git falhou ({' '.join(cmd)}): {e.stderr.strip()}")
+        return False, e.stderr.strip()
+
+
+def _commit(cwd: Path, mensagem: str) -> bool:
+    ok, _ = _git(["git", "add", "."], cwd)
+    ok, _ = _git(["git", "commit", "-m", mensagem], cwd)
+    return ok
+
+
+def _url_autenticada(user: str, token: str, repo: str) -> str:
+    return f"https://{user}:{token}@github.com/{user}/{repo}.git"
+
+
+# ── API GitHub ─────────────────────────────────────────────────────────────
+
+def _gh_request(endpoint: str, token: str, payload: dict = None, method: str = "POST") -> dict | None:
+    url = f"https://api.github.com{endpoint}"
+    data = json.dumps(payload).encode("utf-8") if payload else None
     headers = {
         "Authorization": f"token {token}",
-        "Accept":        "application/vnd.github.v3+json",
-        "User-Agent":    "Fabrica-Agentes-IA"
+        "Accept": "application/vnd.github.v3+json",
+        "Content-Type": "application/json",
+        "User-Agent": "Fabrica-Software-IA",
     }
-    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
         with urllib.request.urlopen(req) as res:
-            sucesso = res.status == 201
-            if sucesso:
-                print(f"[exporter] Repo criado com sucesso.")
-            return sucesso
+            return json.loads(res.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        body = e.read().decode()
-        if e.code == 422 and "already exists" in body:
-            print(f"[exporter] Repo ja existe — prosseguindo com push.")
-            return True
-        print(f"[exporter] Erro HTTP {e.code}: {body[:200]}")
-        return False
-    except Exception as e:
-        print(f"[exporter] Erro ao criar repositorio: {e}")
-        return False
+        print(f"[exporter] Erro HTTP {e.code}: {e.read().decode('utf-8')}")
+        return None
 
 
-def executar_git(cmd, cwd):
-    try:
-        subprocess.run(cmd, cwd=cwd, capture_output=True, check=True)
+def _criar_repo_pessoal(nome: str, token: str) -> bool:
+    """Cria repositório privado na conta pessoal (/user/repos, nunca /orgs/)."""
+    r = _gh_request("/user/repos", token, {
+        "name": nome,
+        "description": "Microsserviço corporativo gerado pela Fábrica de Software IA.",
+        "private": True,
+        "auto_init": False,
+    })
+    if r:
+        print(f"[exporter] Repositório pessoal criado: {r.get('html_url')}")
         return True
-    except Exception as e:
-        print(f"[exporter] Git falhou ({' '.join(str(c) for c in cmd)}): {e}")
-        return False
+    return False
 
 
-def exportar_para_estrutura_clean_arch(comp, teste, nome, docs, swagger, linguagem, framework, e_correcao=False):
-    base_dir = Path(nome)
-    base_dir.mkdir(parents=True, exist_ok=True)
+def _abrir_pull_request(nome_repo: str, token: str, user: str,
+                        head: str, base: str, titulo: str, corpo: str) -> str | None:
+    r = _gh_request(f"/repos/{user}/{nome_repo}/pulls", token, {
+        "title": titulo,
+        "body": corpo,
+        "head": head,
+        "base": base,
+    })
+    if r:
+        url = r.get("html_url")
+        print(f"[exporter] Pull Request aberto: {url}")
+        return url
+    return None
 
+
+# ── ETAPA 1 — Inicialização antecipada ────────────────────────────────────
+
+def inicializar_repositorio_local(nome_projeto: str) -> tuple[Path, int, str]:
+    """
+    Chamado no INÍCIO da esteira, antes do LangGraph executar.
+
+    Retorna (pasta, numero_feature, nome_branch) para que o app.py
+    passe o numero_feature para a Etapa 2.
+    """
+    base = Path("projetos_fabrica") / nome_projeto
+    base.mkdir(parents=True, exist_ok=True)
+    print(f"[exporter] Pasta criada: {base}")
+
+    numero   = _proximo_numero_feature(base)
+    branch   = _nome_branch(numero, nome_projeto)
+    token    = os.getenv("GITHUB_TOKEN", "")
+    user     = os.getenv("GITHUB_USER", "")
+
+    # .gitignore inicial
+    gitignore = base / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text(
+            "__pycache__/\nnode_modules/\ntarget/\nbin/\nobj/\n*.pyc\n.env\n",
+            encoding="utf-8"
+        )
+
+    if not (base / ".git").exists():
+        _git(["git", "init"], base)
+        _git(["git", "config", "user.email", "fabrica-ia@noreply.local"], base)
+        _git(["git", "config", "user.name", "Fábrica de Software IA"], base)
+
+        # main — commit inicial
+        _git(["git", "checkout", "-b", "main"], base)
+        _git(["git", "add", ".gitignore"], base)
+        _git(["git", "commit", "-m",
+              f"chore: repositório {nome_projeto} inicializado pela Fábrica IA"], base)
+
+        # develop — a partir da main
+        _git(["git", "checkout", "-b", "develop"], base)
+        _git(["git", "commit", "--allow-empty", "-m",
+              f"chore: branch develop criada — GitFlow de {nome_projeto}"], base)
+
+        # feature/<n>/<nome> — a partir da develop
+        _git(["git", "checkout", "-b", branch], base)
+        _git(["git", "commit", "--allow-empty", "-m",
+              f"chore: feature #{numero} {nome_projeto} aberta"], base)
+
+    # Cria repo no GitHub (pessoal) e sobe as 3 branches
+    if token and user:
+        _criar_repo_pessoal(base.name, token)
+        remote_url = _url_autenticada(user, token, base.name)
+        _git(["git", "remote", "remove", "origin"], base, check=False)
+        _git(["git", "remote", "add", "origin", remote_url], base)
+
+        _git(["git", "checkout", "main"],    base)
+        _git(["git", "push", "-u", "origin", "main"],    base)
+        _git(["git", "checkout", "develop"], base)
+        _git(["git", "push", "-u", "origin", "develop"], base)
+        _git(["git", "checkout", branch],    base)
+        _git(["git", "push", "-u", "origin", branch],    base)
+
+        print(f"[exporter] GitFlow: main ← develop ← {branch}")
+
+    return base, numero, branch
+
+
+# ── ETAPA 1b — Abre nova branch em projeto existente (evoluir / debug / refatorar) ────
+
+def abrir_branch_em_projeto_existente(
+    nome_projeto: str,
+    tipo: str = TIPO_FEATURE,   # "feature" | "fix" | "refactor"
+) -> tuple[Path, int, str]:
+    """
+    Chamado no INÍCIO da esteira nos modos Evoluir, Debug e Refatorar.
+
+    O projeto já existe em disco e no GitHub — não cria repo novo.
+    Apenas:
+      1. Incrementa o contador do projeto
+      2. Faz checkout da develop (base do GitFlow)
+      3. Cria nova branch <tipo>/<n>/<nome>
+      4. Push da nova branch para o GitHub
+      5. Retorna (pasta, numero_feature, nome_branch)
+    """
+    base = Path("projetos_fabrica") / nome_projeto
+    if not base.exists():
+        raise FileNotFoundError(f"Projeto '{nome_projeto}' não encontrado em projetos_fabrica/")
+
+    numero = _proximo_numero_feature(base)
+    branch = f"{tipo}/{numero}/{_slug(nome_projeto)}"
+    token  = os.getenv("GITHUB_TOKEN", "")
+    user   = os.getenv("GITHUB_USER", "")
+
+    descricao = {
+        TIPO_FEATURE:  "evolucao — nova funcionalidade",
+        TIPO_FIX:      "correcao de defeito",
+        TIPO_REFACTOR: "refatoracao — reestruturacao sem mudanca de comportamento",
+    }.get(tipo, tipo)
+
+    msg_abertura = f"chore: {tipo} #{numero} {nome_projeto} aberta para {descricao}"
+
+    if (base / ".git").exists():
+        _git(["git", "checkout", "develop"], base)
+        _git(["git", "pull", "origin", "develop"], base, check=False)
+        _git(["git", "checkout", "-b", branch], base)
+        _git(["git", "commit", "--allow-empty", "-m", msg_abertura], base)
+    else:
+        _git(["git", "init"], base)
+        _git(["git", "config", "user.email", "fabrica-ia@noreply.local"], base)
+        _git(["git", "config", "user.name", "Fábrica de Software IA"], base)
+        _git(["git", "checkout", "-b", "main"],    base)
+        _git(["git", "checkout", "-b", "develop"], base)
+        _git(["git", "checkout", "-b", branch],    base)
+        _git(["git", "commit", "--allow-empty", "-m", msg_abertura], base)
+
+    if token and user:
+        remote_url = _url_autenticada(user, token, base.name)
+        _git(["git", "remote", "remove", "origin"], base, check=False)
+        _git(["git", "remote", "add", "origin", remote_url], base)
+        _git(["git", "push", "-u", "origin", branch], base)
+        print(f"[exporter] Branch aberta: {branch}")
+
+    return base, numero, branch
+
+
+# ── ETAPA 2 — Exportação final ─────────────────────────────────────────────
+
+def exportar_para_estrutura_clean_arch(
+    comp, teste, nome: str,
+    docs: str, swagger: str,
+    linguagem: str, framework: str,
+    e_correcao: bool = False,
+    numero_feature: int = 0,
+    tipo_operacao: str = TIPO_FEATURE,   # "feature" | "fix" | "refactor"
+) -> bool:
+    """
+    Chamado no FIM da esteira, após todos os guardrails aprovarem.
+
+    Faz 1 commit por camada com mensagem descritiva, depois fecha a feature
+    com commit de encerramento e abre PR → develop.
+    """
+    base = Path(nome)
+    base.mkdir(parents=True, exist_ok=True)
+
+    # Número da feature (usa o passado ou lê o contador do projeto)
+    if numero_feature == 0:
+        try:
+            numero_feature = int((base / ".feature_counter").read_text().strip())
+        except Exception:
+            numero_feature = 1
+
+    nome_projeto = base.name
+    slug         = _slug(nome_projeto)
+    scope        = f"#{numero_feature}/{slug}"
+    branch       = f"{tipo_operacao}/{numero_feature}/{slug}"
+    prefix       = tipo_operacao  # feat / fix / refactor nos commits
+
+    # ── Garante que estamos na branch correta ─────────────────────────────
+    if not (base / ".git").exists():
+        _git(["git", "init"], base)
+        _git(["git", "config", "user.email", "fabrica-ia@noreply.local"], base)
+        _git(["git", "config", "user.name", "Fábrica de Software IA"], base)
+        _git(["git", "checkout", "-b", "main"],    base)
+        _git(["git", "checkout", "-b", "develop"], base)
+        _git(["git", "checkout", "-b", branch],    base)
+    else:
+        _, current = _git(["git", "rev-parse", "--abbrev-ref", "HEAD"], base)
+        if current != branch:
+            _git(["git", "checkout", "-b", branch], base, check=False)
+            _git(["git", "checkout", branch],        base, check=False)
+
+    # ── Mapeamento de arquivos por linguagem ──────────────────────────────
     config_tech = {
-        "Python": {
-            "ext":       ".py",
-            "dep_file":  "requirements.txt",
-            "src_path":  base_dir / "app",
-            "test_path": base_dir / "tests" / "test_app.py"
-        },
-        "TypeScript": {
-            "ext":       ".ts",
-            "dep_file":  "package.json",
-            "src_path":  base_dir / "src",
-            "test_path": base_dir / "tests" / "app.test.ts"
-        },
-        "Java": {
-            "ext":       ".java",
-            "dep_file":  "pom.xml",
-            "src_path":  base_dir / "src" / "main" / "java" / "com" / "company" / "app",
-            "test_path": base_dir / "src" / "test" / "java" / "com" / "company" / "app" / "AppTest.java"
-        },
-        "C#": {
-            "ext":       ".cs",
-            "dep_file":  f"{base_dir.name}.csproj",
-            "src_path":  base_dir / "src",
-            "test_path": base_dir / "tests" / "AppTest.cs"
-        },
-        "Rust": {
-            "ext":       ".rs",
-            "dep_file":  "Cargo.toml",
-            "src_path":  base_dir / "src",
-            "test_path": base_dir / "tests" / "app_test.rs"
-        }
+        "Python":     {"ext": ".py",   "dep_file": "requirements.txt",
+                       "src": base / "app",  "test": base / "tests" / "test_app.py"},
+        "TypeScript": {"ext": ".ts",   "dep_file": "package.json",
+                       "src": base / "src",  "test": base / "tests" / "app.test.ts"},
+        "Java":       {"ext": ".java", "dep_file": "pom.xml",
+                       "src": base / "src/main/java/com/company/app",
+                       "test": base / "src/test/java/com/company/app/AppTest.java"},
+        "C#":         {"ext": ".cs",   "dep_file": f"{base.name}.csproj",
+                       "src": base / "src",  "test": base / "tests" / "AppTest.cs"},
+        "Rust":       {"ext": ".rs",   "dep_file": "Cargo.toml",
+                       "src": base / "src",  "test": base / "tests" / "app_test.rs"},
     }
-
     cfg = config_tech.get(linguagem, config_tech["Python"])
     ext = cfg["ext"]
-    src = cfg["src_path"]
+    src = cfg["src"]
 
-    if linguagem != "Java":
+    if linguagem == "Java":
+        ent_f = src / f"domain/Entities{ext}"
+        srv_f = src / f"use_cases/Services{ext}"
+        rep_f = src / f"adapters/Repository{ext}"
+        web_f = src / f"adapters/HttpApi{ext}"
+    else:
         ent_f = src / f"domain/entities{ext}"
         srv_f = src / f"use_cases/services{ext}"
         rep_f = src / f"adapters/repository{ext}"
         web_f = src / f"adapters/http_api{ext}"
-    else:
-        ent_f = src / "domain"    / f"Entities{ext}"
-        srv_f = src / "use_cases" / f"Services{ext}"
-        rep_f = src / "adapters"  / f"Repository{ext}"
-        web_f = src / "adapters"  / f"HttpApi{ext}"
 
-    mapeamento = {
-        ent_f:                              comp.camada_dominio,
-        srv_f:                              comp.camada_aplicacao,
-        rep_f:                              comp.camada_infra_banco,
-        web_f:                              comp.camada_infra_web,
-        cfg["test_path"]:                   teste.codigo_teste,
-        base_dir / "README.md":             docs,
-        base_dir / "openapi.json":          swagger,
-        base_dir / cfg["dep_file"]:         comp.gerenciador_dependencias
-    }
+    # ── Escreve e commita camada por camada ───────────────────────────────
 
-    for caminho, conteudo in mapeamento.items():
-        caminho = Path(caminho)
+    def _escrever_e_commitar(caminho: Path, conteudo: str, mensagem: str):
         caminho.parent.mkdir(parents=True, exist_ok=True)
-        caminho.write_text(conteudo, encoding="utf-8")
-        # Cria __init__.py para pacotes Python
-        if linguagem == "Python" and caminho.suffix == ".py" and caminho.name != "test_app.py":
-            init = caminho.parent / "__init__.py"
+        caminho.write_text(conteudo or "", encoding="utf-8")
+        _commit(base, mensagem)
+
+    _escrever_e_commitar(
+        ent_f, comp.camada_dominio,
+        f"{prefix}({scope}): [dominio] entidades, value objects e contratos de interface"
+    )
+    _escrever_e_commitar(
+        srv_f, comp.camada_aplicacao,
+        f"{prefix}({scope}): [aplicacao] casos de uso, servicos e regras de negocio"
+    )
+    _escrever_e_commitar(
+        rep_f, comp.camada_infra_banco,
+        f"{prefix}({scope}): [infra/banco] persistencia, ORM e repositorios"
+    )
+    _escrever_e_commitar(
+        web_f, comp.camada_infra_web,
+        f"{prefix}({scope}): [infra/web] rotas HTTP, controladores e middlewares {framework}"
+    )
+
+    # __init__.py para Python
+    if linguagem == "Python":
+        for d in [src / "domain", src / "use_cases", src / "adapters", base / "tests"]:
+            d.mkdir(parents=True, exist_ok=True)
+            init = d / "__init__.py"
             if not init.exists():
                 init.write_text("", encoding="utf-8")
 
+    # Testes
+    test_path = cfg["test"]
+    test_path.parent.mkdir(parents=True, exist_ok=True)
+    test_path.write_text(teste.codigo_teste or "", encoding="utf-8")
+    _commit(base, f"{prefix}({scope}): [testes] suite de testes unitarios com mocks — {linguagem}")
+
+    # Dependências
+    dep_path = base / cfg["dep_file"]
+    dep_path.write_text(comp.gerenciador_dependencias or "", encoding="utf-8")
+    _commit(base, f"{prefix}({scope}): [deps] arquivo de dependencias {cfg['dep_file']} atualizado")
+
+    # Docs e contratos
+    (base / "README.md").write_text(docs or "", encoding="utf-8")
+    (base / "openapi.json").write_text(swagger or "", encoding="utf-8")
+
+    # Dockerfiles
     dockerfiles = {
-        "Python":     "FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nRUN pip install -r requirements.txt\nCMD [\"python\", \"main.py\"]",
-        "TypeScript": "FROM node:18-slim\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nCMD [\"node\", \"dist/main.js\"]",
-        "Java":       "FROM maven:3.8-openjdk-17 AS build\nWORKDIR /app\nCOPY . .\nRUN mvn clean package\nFROM openjdk:17-slim\nCOPY --from=build /app/target/*.jar app.jar\nCMD [\"java\", \"-jar\", \"app.jar\"]",
-        "C#":         "FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build\nWORKDIR /app\nCOPY . .\nRUN dotnet publish -c Release -o out\nFROM mcr.microsoft.com/dotnet/aspnet:8.0\nWORKDIR /app\nCOPY --from=build /app/out .\nCMD [\"dotnet\", \"app.dll\"]",
-        "Rust":       "FROM rust:1.70 AS build\nWORKDIR /app\nCOPY . .\nRUN cargo build --release\nFROM debian:bullseye-slim\nCOPY --from=build /app/target/release/app /app\nCMD [\"/app\"]"
+        "Python":     'FROM python:3.11-slim\nWORKDIR /app\nCOPY . .\nRUN pip install -r requirements.txt\nEXPOSE 8000\nCMD ["uvicorn", "app.adapters.http_api:app", "--host", "0.0.0.0", "--port", "8000"]',
+        "TypeScript": 'FROM node:20-slim\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nEXPOSE 3000\nCMD ["node", "dist/main.js"]',
+        "Java":       "FROM maven:3.9-eclipse-temurin-21 AS build\nWORKDIR /app\nCOPY . .\nRUN mvn clean package -DskipTests\nFROM eclipse-temurin:21-jre-jammy\nCOPY --from=build /app/target/*.jar app.jar\nEXPOSE 8080\nCMD [\"java\", \"-jar\", \"app.jar\"]",
+        "C#":         "FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build\nWORKDIR /app\nCOPY . .\nRUN dotnet publish -c Release -o out\nFROM mcr.microsoft.com/dotnet/aspnet:8.0\nWORKDIR /app\nCOPY --from=build /app/out .\nEXPOSE 5000\nCMD [\"dotnet\", \"app.dll\"]",
+        "Rust":       "FROM rust:1.78 AS build\nWORKDIR /app\nCOPY . .\nRUN cargo build --release\nFROM debian:bookworm-slim\nCOPY --from=build /app/target/release/app /usr/local/bin/app\nEXPOSE 8080\nCMD [\"app\"]",
     }
-
-    (base_dir / "Dockerfile").write_text(
-        dockerfiles.get(linguagem, dockerfiles["Python"]), encoding="utf-8"
-    )
-
-    (base_dir / "docker-compose.yml").write_text(
-        "version: '3.8'\n"
-        "services:\n"
-        "  web_api:\n"
-        "    build: .\n"
-        "    ports: [\"8000:8000\"]\n"
-        "    depends_on:\n"
-        "      db_postgres:\n"
-        "        condition: service_healthy\n"
-        "  db_postgres:\n"
-        "    image: postgres:15-alpine\n"
-        "    environment:\n"
-        "      - POSTGRES_USER=user\n"
-        "      - POSTGRES_PASSWORD=pass\n"
-        "      - POSTGRES_DB=db_app\n"
+    (base / "Dockerfile").write_text(dockerfiles.get(linguagem, dockerfiles["Python"]), encoding="utf-8")
+    (base / "docker-compose.yml").write_text(
+        "version: '3.8'\nservices:\n  web_api:\n    build: .\n    ports: [\"8000:8000\"]\n"
+        "    depends_on:\n      db_postgres:\n        condition: service_healthy\n"
+        "  db_postgres:\n    image: postgres:16-alpine\n"
+        "    environment:\n      POSTGRES_USER: user\n      POSTGRES_PASSWORD: pass\n      POSTGRES_DB: db_app\n"
         "    ports: [\"5432:5432\"]\n"
-        "    healthcheck:\n"
-        "      test: [\"CMD-SHELL\", \"pg_isready -U user -d db_app\"]\n"
-        "      interval: 5s\n"
-        "      timeout: 5s\n"
-        "      retries: 5\n",
+        "    healthcheck:\n      test: [\"CMD-SHELL\", \"pg_isready -U user -d db_app\"]\n"
+        "      interval: 5s\n      timeout: 5s\n      retries: 5\n",
         encoding="utf-8"
     )
+    _commit(base, f"{prefix}({scope}): [docs] README, openapi.json, Dockerfile e docker-compose")
 
-    # ── Git local ────────────────────────────────────────────────────────────
-    if not (base_dir / ".git").exists():
-        executar_git(["git", "init"], base_dir)
-        executar_git(["git", "checkout", "-b", "main"], base_dir)
+    # ── Commit de encerramento ─────────────────────────────────────────────
+    ts = datetime.now().strftime("%d/%m/%Y %H:%M")
+    descricao_encerramento = {
+        TIPO_FEATURE:  "finalizada",
+        TIPO_FIX:      "correcao finalizada",
+        TIPO_REFACTOR: "refatoracao finalizada",
+    }.get(tipo_operacao, "finalizada")
 
-    with open(base_dir / ".gitignore", "w") as f:
-        f.write("__pycache__/\nnode_modules/\ntarget/\nbin/\nobj/\n*.pyc\n.env\n")
+    msg_final = f"{prefix}({scope}): {tipo_operacao} #{numero_feature} {nome_projeto} {descricao_encerramento} ✅ [{ts}]"
+    _git(["git", "commit", "--allow-empty", "-m", msg_final], base)
+    print(f"[exporter] {msg_final}")
 
-    executar_git(["git", "add", "."], base_dir)
-    msg_commit = f"🔧 fix: patch [{framework}]" if e_correcao else f"🚀 feat: init [{linguagem}/{framework}]"
-    executar_git(["git", "commit", "-m", msg_commit], base_dir)
+    # ── Push e Pull Request ───────────────────────────────────────────────
+    token = os.getenv("GITHUB_TOKEN", "")
+    user  = os.getenv("GITHUB_USER", "")
 
-    # ── Push para o GitHub ───────────────────────────────────────────────────
-    tk = os.getenv("GITHUB_TOKEN")
-    us = os.getenv("GITHUB_USER")
+    if not (token and user):
+        print("[exporter] GITHUB_TOKEN/GITHUB_USER não configurados — pulando push.")
+        return False
 
-    if tk and us:
-        repo_name = base_dir.name
-        if not e_correcao:
-            criar_repositorio_remoto_no_github(repo_name, tk)
-            # Remove remote antigo se existir (idempotente)
-            executar_git(["git", "remote", "remove", "origin"], base_dir)
-            # URL autenticada correta
-            remote_url = f"https://{us}:{tk}@github.com/{us}/{repo_name}.git"
-            executar_git(["git", "remote", "add", "origin", remote_url], base_dir)
+    remote_url = _url_autenticada(user, token, base.name)
+    _git(["git", "remote", "remove", "origin"], base, check=False)
+    _git(["git", "remote", "add", "origin", remote_url], base)
 
-        # Garante que o remote está correto mesmo em modo correção
-        remote_url = f"https://{us}:{tk}@github.com/{us}/{repo_name}.git"
-        executar_git(["git", "remote", "set-url", "origin", remote_url], base_dir)
+    ok, _ = _git(["git", "push", "-u", "origin", branch], base)
+    if not ok:
+        print(f"[exporter] Push falhou para {branch}.")
+        return False
 
-        return executar_git(["git", "push", "-u", "origin", "main"], base_dir)
+    # Emoji e título do PR por tipo de operação
+    emoji_pr = {"feature": "🚀", "fix": "🔧", "refactor": "♻️"}.get(tipo_operacao, "🚀")
+    label_pr = {
+        TIPO_FEATURE:  f"feat #{numero_feature}: {nome_projeto}",
+        TIPO_FIX:      f"fix #{numero_feature}: Correção — {nome_projeto}",
+        TIPO_REFACTOR: f"refactor #{numero_feature}: Refatoração — {nome_projeto}",
+    }.get(tipo_operacao, f"feat #{numero_feature}: {nome_projeto}")
 
-    return False
+    titulo_pr = f"{emoji_pr} {label_pr} [{linguagem}/{framework}]"
+
+    nota_pr = {
+        TIPO_FEATURE:  "Esta branch adiciona nova funcionalidade. Revisar endpoints e casos de uso.",
+        TIPO_FIX:      "Esta branch corrige um defeito. Confirmar que os testes de regressão passam.",
+        TIPO_REFACTOR: "⚠️ Esta branch reestrutura o código sem alterar o comportamento externo. Confirmar que todos os testes existentes continuam passando após o merge.",
+    }.get(tipo_operacao, "")
+
+    corpo_pr = (
+        f"## {tipo_operacao.capitalize()} #{numero_feature} — {nome_projeto}\n\n"
+        f"| Campo | Valor |\n|-------|-------|\n"
+        f"| **Tipo** | {tipo_operacao} |\n"
+        f"| **Stack** | {linguagem} / {framework} |\n"
+        f"| **Branch** | `{branch}` → `develop` |\n"
+        f"| **Gerado em** | {ts} |\n\n"
+        f"### Commits desta branch\n"
+        f"- `[dominio]` entidades, value objects e contratos de interface\n"
+        f"- `[aplicacao]` casos de uso, serviços e regras de negócio\n"
+        f"- `[infra/banco]` persistência, ORM e repositórios\n"
+        f"- `[infra/web]` rotas HTTP, controladores e middlewares {framework}\n"
+        f"- `[testes]` suíte de testes unitários com mocks\n"
+        f"- `[deps]` arquivo de dependências\n"
+        f"- `[docs]` README, OpenAPI v3, Dockerfile e docker-compose\n"
+        f"- ✅ {tipo_operacao} #{numero_feature} {nome_projeto} {descricao_encerramento}\n\n"
+        f"### Guardrails aprovados\n"
+        f"- ✅ Quality Gate — score ≥ 80 em Clean Code e Clean Architecture\n"
+        f"- ✅ SAST Bandit — sem vulnerabilidades de segurança\n"
+        f"- ✅ PyTest Sandbox — todos os testes passaram\n\n"
+        f"> {nota_pr}\n\n"
+        f"> Após o merge em `develop`, abra PR de `develop` → `main` para produção."
+    )
+
+    pr_url = _abrir_pull_request(
+        nome_repo=base.name,
+        token=token, user=user,
+        head=branch, base="develop",
+        titulo=titulo_pr, corpo=corpo_pr,
+    )
+
+    return pr_url is not None

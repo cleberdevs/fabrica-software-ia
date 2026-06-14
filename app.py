@@ -17,7 +17,12 @@ from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 from grafo import app as langgraph_app, pool_manager, ler_codigo_da_pasta_legada
-from exporter import exportar_para_estrutura_clean_arch
+from exporter import (
+    exportar_para_estrutura_clean_arch,
+    inicializar_repositorio_local,
+    abrir_branch_em_projeto_existente,
+    TIPO_FEATURE, TIPO_FIX, TIPO_REFACTOR,
+)
 
 # ── Setup ──────────────────────────────────────────────────────────────────
 DIR_PROJ = Path("projetos_fabrica")
@@ -56,6 +61,7 @@ async def gerar(
     codigo_quebrado: str = Form(""),
     erro_log: str = Form(""),
     nova_funcionalidade: str = Form(""),
+    instrucao_refatoracao: str = Form(""),
     linguagem: str = Form("Python"),
     framework: str = Form("FastAPI"),
     arquivos: list[UploadFile] = File(default=[]),
@@ -111,31 +117,83 @@ async def gerar(
 
             # ── Prepara inputs por modo ────────────────────────────────────
             codigo_legado, hist_erros, e_correcao = "", [], False
+            numero_feature = 0
+            tipo_operacao  = TIPO_FEATURE
 
             if modo == "novo":
                 if not requisito.strip():
                     yield _sse("erro", "❌ Descreva os requisitos do software.")
                     return
-                projeto_final = DIR_PROJ / nome_projeto
-                req_final = requisito
+                yield _sse("log", f"📁 Criando repositório '{nome_projeto}' no GitHub...")
+                loop = asyncio.get_event_loop()
+                projeto_final, numero_feature, branch_feature = await loop.run_in_executor(
+                    None, lambda: inicializar_repositorio_local(nome_projeto)
+                )
+                yield _sse("log", f"✅ GitFlow: main ← develop ← {branch_feature}")
+                req_final     = requisito
+                tipo_operacao = TIPO_FEATURE
 
             elif modo == "debug":
                 if not projeto_existente:
                     yield _sse("erro", "❌ Selecione um projeto válido.")
                     return
-                projeto_final = DIR_PROJ / projeto_existente
-                req_final = f"CORREÇÃO DE BUG.\nCódigo:\n{codigo_quebrado}"
-                hist_erros = [f"Log de erro:\n{erro_log}"]
-                e_correcao = True
+                yield _sse("log", f"🔧 Abrindo branch de correção em '{projeto_existente}'...")
+                loop = asyncio.get_event_loop()
+                projeto_final, numero_feature, branch_feature = await loop.run_in_executor(
+                    None, lambda: abrir_branch_em_projeto_existente(projeto_existente, tipo=TIPO_FIX)
+                )
+                yield _sse("log", f"✅ GitFlow: develop ← {branch_feature}")
+                req_final     = f"CORREÇÃO DE BUG.\nCódigo:\n{codigo_quebrado}"
+                hist_erros    = [f"Log de erro:\n{erro_log}"]
+                e_correcao    = True
+                tipo_operacao = TIPO_FIX
+
+            elif modo == "refatorar":
+                if not projeto_existente:
+                    yield _sse("erro", "❌ Selecione um projeto válido.")
+                    return
+                yield _sse("log", f"♻️ Abrindo branch de refatoração em '{projeto_existente}'...")
+                loop = asyncio.get_event_loop()
+                projeto_final, numero_feature, branch_feature = await loop.run_in_executor(
+                    None, lambda: abrir_branch_em_projeto_existente(projeto_existente, tipo=TIPO_REFACTOR)
+                )
+                yield _sse("log", f"✅ GitFlow: develop ← {branch_feature}")
+                codigo_legado = ler_codigo_da_pasta_legada(str(projeto_final))
+                instrucao = instrucao_refatoracao.strip() or (
+                    "Aplique as melhores práticas de engenharia de software: "
+                    "SOLID, DRY, KISS e Clean Architecture. "
+                    "Melhore nomes de variáveis, funções e classes para máxima legibilidade. "
+                    "Elimine código duplicado, métodos longos e complexidade desnecessária. "
+                    "Extraia interfaces para todos os repositórios. "
+                    "Garanta que cada classe tenha uma única responsabilidade."
+                )
+                req_final = (
+                    f"REFATORAÇÃO DO SISTEMA EXISTENTE.\n"
+                    f"Instrução: {instrucao}\n\n"
+                    f"REGRAS OBRIGATÓRIAS:\n"
+                    f"- NÃO altere o comportamento externo (rotas, contratos de API, respostas)\n"
+                    f"- Aplique Clean Code (SOLID, DRY, SRP) em todas as camadas\n"
+                    f"- Melhore nomes de variáveis, funções e classes para máxima legibilidade\n"
+                    f"- Elimine código duplicado e complexidade desnecessária\n"
+                    f"- Mantenha todos os testes existentes passando\n"
+                )
+                e_correcao    = True
+                tipo_operacao = TIPO_REFACTOR
 
             else:  # evoluir
                 if not projeto_existente:
                     yield _sse("erro", "❌ Selecione um projeto válido.")
                     return
-                projeto_final = DIR_PROJ / projeto_existente
-                req_final = nova_funcionalidade
+                yield _sse("log", f"⚙️ Abrindo branch de evolução em '{projeto_existente}'...")
+                loop = asyncio.get_event_loop()
+                projeto_final, numero_feature, branch_feature = await loop.run_in_executor(
+                    None, lambda: abrir_branch_em_projeto_existente(projeto_existente, tipo=TIPO_FEATURE)
+                )
+                yield _sse("log", f"✅ GitFlow: develop ← {branch_feature}")
+                req_final     = nova_funcionalidade
                 codigo_legado = ler_codigo_da_pasta_legada(str(projeto_final))
-                e_correcao = True
+                e_correcao    = True
+                tipo_operacao = TIPO_FEATURE
 
             inputs = {
                 "requisito": req_final,
@@ -220,7 +278,10 @@ async def gerar(
 
                 sync = exportar_para_estrutura_clean_arch(
                     prod, state["codigo_teste"], str(projeto_final),
-                    docs, swag, linguagem, framework, e_correcao=e_correcao
+                    docs, swag, linguagem, framework,
+                    e_correcao=e_correcao,
+                    numero_feature=numero_feature,
+                    tipo_operacao=tipo_operacao,
                 )
 
                 res_git = (

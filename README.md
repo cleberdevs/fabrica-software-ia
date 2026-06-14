@@ -199,6 +199,77 @@ Em **Settings → Variables and secrets** do seu Space:
 
 ---
 
+## 📊 Rastreamento com LangSmith
+
+O LangSmith é a camada de **observabilidade** da fábrica. Toda execução do grafo LangGraph é automaticamente instrumentada — cada nó, cada chamada LLM e cada decisão de roteamento fica registrada no projeto `fabrica-key-rotation` em tempo real.
+
+### O que exatamente é rastreado
+
+O LangSmith captura o `EstadoEngenharia` completo (o TypedDict que trafega entre os nós do grafo) em cada transição. Na prática, para cada execução você vê:
+
+#### Nó `chief` — Chief AI Officer
+- **Entrada:** `requisito`, `codigo_legado`, `contexto_arquivos` (planilhas/contratos/visão de imagens), `linguagem_selecionada`, `framework_selecionado`
+- **Saída:** `plano_do_chief` — o plano arquitetural completo gerado pelo Gemini 2.5 Flash Lite
+- **LLM call:** prompt exato enviado ao `google/gemini-2.5-flash-lite` via OpenRouter + resposta bruta + tokens + latência
+
+#### Nó `desenvolvedor` — Especialista Dev Tier 2
+- **Entrada:** `plano_do_chief` + `historico_erros` (feedbacks de ciclos anteriores)
+- **Saída:** objeto `ComponenteMultiLinguagem` com as 4 camadas de código em JSON estruturado
+- **LLM call:** qual modelo foi usado (`deepseek-v4-pro`, `kimi-k2` ou `qwen3-coder-next`), quantas tentativas de failover ocorreram, esperas progressivas aplicadas (10s → 30s → 60s → 120s → 180s)
+- **Fallback:** cada troca de modelo pelo `executar_com_failover` aparece como uma sub-run separada
+
+#### Nó `quality_gate` — Auditor Semântico Tier 3
+- **Entrada:** `camada_dominio` + `camada_aplicacao` + `camada_infra_web`
+- **Saída:** `QualityReport` com `score_clean_code` (0–100), `score_arquitetura` (0–100) e `justificativa_critica`
+- **Decisão de roteamento:** se a média dos scores for < 80, o roteador manda de volta ao `desenvolvedor` — cada ciclo de reprovação fica registrado com os scores exatos
+
+#### Nó `sast` — Sandbox Bandit (Python)
+- **Entrada:** as 4 camadas de código escritas em `app_code_temp.py`
+- **Saída:** `returncode` do Bandit + stdout completo com as vulnerabilidades encontradas
+- **Em caso de falha:** o log do Bandit é appended em `historico_erros` e o roteador dispara `chief_retry`
+
+#### Nó `gerador_testes` — Agente QA
+- **Entrada:** `camada_infra_web` (rotas HTTP do projeto)
+- **Saída:** objeto `UnitTestComponent` com a suíte de testes completa em mock
+- **LLM call:** chamada ao `gemini-2.5-flash-lite` com output estruturado via Pydantic
+
+#### Nó `executor_pytest` — Runtime Sandbox
+- **Entrada:** código de produção (`app_code.py`) + testes (`test_app.py`) escritos em disco
+- **Saída:** `returncode` do PyTest + stdout com resultado de cada teste
+- **Em caso de falha:** stderr/stdout do PyTest appended em `historico_erros`, roteador dispara `chief_retry`
+
+### Custos visíveis no LangSmith
+
+Como todos os modelos passam pelo OpenRouter, o LangSmith registra:
+
+| Métrica | O que aparece |
+|---------|---------------|
+| **Tokens de entrada** | Tamanho do prompt por chamada — útil para ver quanto o código legado ou histórico de erros pesa no contexto |
+| **Tokens de saída** | Tamanho do JSON gerado por camada de código |
+| **Latência por nó** | Tempo de resposta de cada modelo — permite comparar deepseek vs kimi vs qwen na prática |
+| **Número de retries** | Quantos ciclos quality_gate → desenvolvedor ocorreram até aprovação |
+| **Total da run** | Tempo de ponta a ponta da esteira completa |
+
+> O custo financeiro real é gerenciado pelo OpenRouter (não pelo LangSmith). O LangSmith mostra a contagem de tokens; o painel do OpenRouter em [openrouter.ai/activity](https://openrouter.ai/activity) mostra o custo em dólares por chamada.
+
+### Como acessar
+
+1. Acesse [smith.langchain.com](https://smith.langchain.com)
+2. Selecione o projeto **`fabrica-key-rotation`**
+3. Cada execução aparece como uma árvore com 6 nós expansíveis — clique em qualquer nó para ver o estado de entrada, saída e os prompts exatos enviados a cada modelo
+
+### Como configurar
+
+| Variável | Valor |
+|----------|-------|
+| `LANGCHAIN_API_KEY` | Chave gerada em smith.langchain.com → Settings → API Keys |
+| `LANGCHAIN_TRACING_V2` | `true` para ativar, `false` para desativar sem alterar o código |
+| `LANGCHAIN_PROJECT` | `fabrica-key-rotation` — nome do projeto no painel do LangSmith |
+
+> **Erro 403 Forbidden:** a chave está inválida ou expirada. Gere uma nova em smith.langchain.com ou mude `LANGCHAIN_TRACING_V2` para `false` — a fábrica funciona normalmente sem rastreamento.
+
+---
+
 ## 🏁 Como Rodar
 
 ### Localmente
