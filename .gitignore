@@ -69,3 +69,8 @@ Thumbs.db
 *.bak
 .env
 .env
+
+# ==========================================
+# 🖥️ # Projetos gerados pela fábrica — não sobem para o repositório da fábrica
+# ==========================================
+projetos_fabrica/
