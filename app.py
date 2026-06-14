@@ -334,62 +334,97 @@ def _sanitizar_markdown(texto: str) -> str:
 
 def _gerar_mermaid_classes(codigo_json: str) -> str:
     import json, re
+
+    def sanitizar_id(s: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_]", "_", s)
+
     try:
         clean = re.sub(r"```[a-z]*|```", "", codigo_json).strip()
         data = json.loads(clean)
     except Exception:
         return ""
-    rel_map = {"inheritance": "<|--", "composition": "*--", "aggregation": "o--", "association": "-->"}
+
+    rel_map = {
+        "inheritance":  "<|--",
+        "composition":  "*--",
+        "aggregation":  "o--",
+        "association":  "-->",
+    }
     lines = ["classDiagram"]
     for cls in data.get("classes", []):
-        name = re.sub(r"[^A-Za-z0-9_]", "_", cls["name"])
+        name = sanitizar_id(cls["name"])
         lines.append(f"  class {name} {{")
         for attr in cls.get("attributes", []):
-            lines.append(f"    +{re.sub(r'[~<>]', '', attr).strip()}")
+            safe = re.sub(r"[~<>(){}]", "", attr).strip()
+            lines.append(f"    +{safe}")
         for meth in cls.get("methods", []):
-            safe = re.sub(r"[~<>]", "", meth).strip()
+            safe = re.sub(r"[~<>{}]", "", meth).strip()
             if not safe.endswith(")"):
                 safe += "()"
             lines.append(f"    +{safe}")
         lines.append("  }")
     for rel in data.get("relations", []):
         arrow = rel_map.get(rel.get("type", "association"), "-->")
-        frm = re.sub(r"[^A-Za-z0-9_]", "_", rel["from"])
-        to = re.sub(r"[^A-Za-z0-9_]", "_", rel["to"])
+        frm = sanitizar_id(rel["from"])
+        to  = sanitizar_id(rel["to"])
         lines.append(f"  {frm} {arrow} {to}")
     return "\n".join(lines)
 
 
 def _gerar_mermaid_deploy(codigo_json: str) -> str:
     import json, re
+
+    def sanitizar_label(label: str) -> str:
+        """Remove caracteres que quebram o parser do Mermaid."""
+        label = re.sub(r"[()/\\]", "", label)
+        label = re.sub(r"\s+", " ", label).strip()
+        return label
+
+    def sanitizar_id(id_str: str) -> str:
+        return re.sub(r"[^A-Za-z0-9_]", "_", id_str)
+
     try:
         clean = re.sub(r"```[a-z]*|```", "", codigo_json).strip()
         data = json.loads(clean)
     except Exception:
         return ""
-    shape_map = {"rect": ("[", "]"), "cylinder": ("[(", ")]"), "diamond": ("{", "}"), "rounded": ("(", ")")}
+
+    shape_map = {
+        "rect":     ("[", "]"),
+        "cylinder": ("[(", ")]"),
+        "diamond":  ("{", "}"),
+        "rounded":  ("(", ")"),
+    }
     lines = ["flowchart TD"]
+
     for sg in data.get("subgraphs", []):
-        sg_id = re.sub(r"[^A-Za-z0-9_]", "_", sg["id"])
-        lines.append(f"  subgraph {sg_id}[{sg.get('label', sg_id)}]")
+        sg_id    = sanitizar_id(sg["id"])
+        sg_label = sanitizar_label(sg.get("label", sg_id))
+        lines.append(f"  subgraph {sg_id}[{sg_label}]")
         for nid in sg.get("nodes", []):
             node = next((n for n in data["nodes"] if n["id"] == nid), None)
             if node:
-                nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
+                nid_safe  = sanitizar_id(node["id"])
+                nid_label = sanitizar_label(node.get("label", nid_safe))
                 o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
-                lines.append(f"    {nid_safe}{o}{node.get('label', nid_safe)}{c}")
+                lines.append(f"    {nid_safe}{o}{nid_label}{c}")
         lines.append("  end")
+
     subgraph_nodes = {n for sg in data.get("subgraphs", []) for n in sg.get("nodes", [])}
     for node in data.get("nodes", []):
         if node["id"] not in subgraph_nodes:
-            nid_safe = re.sub(r"[^A-Za-z0-9_]", "_", node["id"])
+            nid_safe  = sanitizar_id(node["id"])
+            nid_label = sanitizar_label(node.get("label", nid_safe))
             o, c = shape_map.get(node.get("shape", "rect"), ("[", "]"))
-            lines.append(f"  {nid_safe}{o}{node.get('label', nid_safe)}{c}")
+            lines.append(f"  {nid_safe}{o}{nid_label}{c}")
+
     for edge in data.get("edges", []):
-        frm = re.sub(r"[^A-Za-z0-9_]", "_", edge["from"])
-        to = re.sub(r"[^A-Za-z0-9_]", "_", edge["to"])
-        lbl = edge.get("label", "")
-        lines.append(f"  {frm} -->{'|' + lbl + '|' if lbl else ''} {to}")
+        frm = sanitizar_id(edge["from"])
+        to  = sanitizar_id(edge["to"])
+        lbl = sanitizar_label(edge.get("label", ""))
+        arrow = f" -->|{lbl}| " if lbl else " --> "
+        lines.append(f"  {frm}{arrow}{to}")
+
     return "\n".join(lines)
 
 
