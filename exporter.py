@@ -106,7 +106,7 @@ def _url_autenticada(user: str, token: str, repo: str) -> str:
 
 def _gh_request(endpoint: str, token: str, payload: dict = None, method: str = "POST") -> dict | None:
     url = f"https://api.github.com{endpoint}"
-    data = json.dumps(payload).encode("utf-8") if payload else None
+    data = json.dumps(payload).encode("utf-8") if payload and method != "GET" else None
     headers = {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github.v3+json",
@@ -149,6 +149,35 @@ def _abrir_pull_request(nome_repo: str, token: str, user: str,
         print(f"[exporter] Pull Request aberto: {url}")
         return url
     return None
+
+
+def _obter_numero_pr(nome_repo: str, token: str, user: str,
+                     head: str, base: str) -> int | None:
+    """Busca o número do PR aberto de head → base."""
+    r = _gh_request(
+        f"/repos/{user}/{nome_repo}/pulls?state=open&head={user}:{head}&base={base}",
+        token, method="GET"
+    )
+    if r and isinstance(r, list) and len(r) > 0:
+        return r[0].get("number")
+    return None
+
+
+def _merge_pull_request(nome_repo: str, token: str, user: str,
+                        pr_number: int, commit_msg: str) -> bool:
+    """Faz merge de um PR pelo número via API do GitHub."""
+    r = _gh_request(
+        f"/repos/{user}/{nome_repo}/pulls/{pr_number}/merge",
+        token,
+        {
+            "commit_title": commit_msg,
+            "merge_method": "merge",   # preserva histórico completo
+        }
+    )
+    if r and r.get("merged"):
+        return True
+    print(f"[exporter] Merge PR #{pr_number} falhou: {r}")
+    return False
 
 
 # ── ETAPA 1 — Inicialização antecipada ────────────────────────────────────
@@ -494,4 +523,16 @@ def exportar_para_estrutura_clean_arch(
         titulo=titulo_pr, corpo=corpo_pr,
     )
 
-    return pr_url is not None
+    if not pr_url:
+        return False
+
+    # ── Merge automático: feature → develop ──────────────────────────────
+    pr_number = _obter_numero_pr(base.name, token, user, branch, "develop")
+    if pr_number:
+        merged = _merge_pull_request(base.name, token, user, pr_number,
+                                     f"Merge automático: {branch} → develop")
+        if merged:
+            print(f"[exporter] ✅ Merge concluído: {branch} → develop")
+            print(f"[exporter] 📋 PR develop → main disponível para revisão manual no GitHub")
+
+    return True
